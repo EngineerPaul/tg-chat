@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Node
+node_modules/
+web/.next/
+web/out/
+
+# Data
+data/
+*.db
+*.db-wal
+*.db-shm
+uploads/
+apk/*.apk
+deploy/apk/*.apk
+
+# Android
+android/.gradle/
+android/build/
+android/**/build/
+android/local.properties
+android/**/google-services.json
+*.iml
+.idea/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db

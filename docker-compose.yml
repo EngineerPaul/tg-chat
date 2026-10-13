@@ -1,0 +1,60 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: chat-backend
+    restart: unless-stopped
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://daystream.ru}
+      PUBLIC_BASE: ${PUBLIC_BASE:-https://daystream.ru/extra/chat}
+      DATA_DIR: /data
+      FIREBASE_CREDENTIALS: ${FIREBASE_CREDENTIALS:-}
+    volumes:
+      - chat_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/extra/chat/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - default
+
+  web:
+    build:
+      context: ./web
+      args:
+        NEXT_PUBLIC_API_BASE: /extra/chat/api
+        NEXT_PUBLIC_WS_BASE: /extra/chat/api/ws
+        NEXT_PUBLIC_BASE_PATH: /extra/chat
+    container_name: chat-web
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - default
+
+  chat:
+    image: nginx:1.27-alpine
+    container_name: chat
+    restart: unless-stopped
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/apk:/apk:ro
+    depends_on:
+      - backend
+      - web
+    networks:
+      default: {}
+      extra_net:
+        aliases:
+          - chat
+
+volumes:
+  chat_data:
+
+networks:
+  extra_net:
+    external: true
+    name: extra_services
