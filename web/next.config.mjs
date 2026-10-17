@@ -5,7 +5,7 @@ const basePath = "/extra/chat";
 const nextConfig = {
   output: "standalone",
   basePath,
-  trailingSlash: false,
+  trailingSlash: true,
 };
 
 export default nextConfig;
