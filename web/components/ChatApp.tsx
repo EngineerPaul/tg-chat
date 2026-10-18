@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import EmojiPicker from "@/components/EmojiPicker";
 import { api, jsonOrThrow, logout } from "@/lib/api";
 import { cacheDelete, cacheMessages, loadCached } from "@/lib/cache";
 import { compressPhoto, maybeGzip } from "@/lib/compress";
@@ -103,9 +104,11 @@ export default function ChatApp() {
   const [typing, setTyping] = useState(false);
   const [narrowList, setNarrowList] = useState(false);
   const [flash, setFlash] = useState(false);
+  const [emojiOn, setEmojiOn] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const dialogsRef = useRef<DialogRow[]>([]);
   const boxRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const typingTimer = useRef<number | null>(null);
   const activeIdRef = useRef<number | null>(null);
   const meIdRef = useRef<number | null>(null);
@@ -388,6 +391,27 @@ export default function ChatApp() {
   }
 
   /**
+   * Вставить эмодзи в позицию курсора.
+   * @param emoji символ
+   */
+  function insertEmoji(emoji: string) {
+    const el = inputRef.current;
+    const start = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + emoji + text.slice(end);
+    setText(next);
+    requestAnimationFrame(() => {
+      if (!el) return;
+      const pos = start + emoji.length;
+      el.focus();
+      el.setSelectionRange(pos, pos);
+    });
+    if (wsRef.current?.readyState === 1 && active) {
+      wsRef.current.send(JSON.stringify({ event: "typing", dialog_id: active.id }));
+    }
+  }
+
+  /**
    * Найти человека по логину и открыть диалог.
    */
   async function findUser() {
@@ -623,6 +647,7 @@ export default function ChatApp() {
               ))}
             </div>
             {reply ? <div className="composer">Ответ: {reply.text || reply.type} <button type="button" onClick={() => setReply(null)}>×</button></div> : null}
+            {emojiOn ? <EmojiPicker onPick={insertEmoji} /> : null}
             <div className="composer">
               <label className="iconbtn">📎
                 <input hidden type="file" multiple accept="image/*,video/*" onChange={(e) => sendMedia(e.target.files)} />
@@ -630,7 +655,14 @@ export default function ChatApp() {
               <label className="iconbtn">📄
                 <input hidden type="file" multiple onChange={(e) => sendFiles(e.target.files)} />
               </label>
-              <textarea value={text} onChange={(e) => onType(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendText(); } }} placeholder="Сообщение" />
+              <textarea
+                ref={inputRef}
+                value={text}
+                onChange={(e) => onType(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendText(); } }}
+                placeholder="Сообщение"
+              />
+              <button className={`iconbtn ${emojiOn ? "on" : ""}`} type="button" onClick={() => setEmojiOn((v) => !v)}>😊</button>
               <button className="iconbtn" type="button" onClick={sendText}>➤</button>
             </div>
           </>
