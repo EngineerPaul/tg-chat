@@ -29,11 +29,12 @@ jobs:
         run: docker compose build
 
       - name: Check nginx config
-        run: >
-          docker compose run --rm --no-deps
-          --add-host chat-backend:127.0.0.1
-          --add-host chat-web:127.0.0.1
-          chat nginx -t
+        run: |
+          docker run --rm \
+            --add-host chat-backend:127.0.0.1 \
+            --add-host chat-web:127.0.0.1 \
+            -v "$PWD/deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+            nginx:1.27-alpine nginx -t
 
   deploy:
     name: Deploy (SSH -> docker compose)
