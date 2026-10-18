@@ -27,22 +27,30 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
-import ru.daystream.calc.media.PhotoCompressor
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import org.json.JSONArray
+import org.json.JSONObject
 import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.TokenClient
+import ru.daystream.calc.media.PhotoCompressor
+import ru.daystream.calc.net.openWs
 
 /**
  * Скрытый чат: список и переписка.
@@ -91,9 +99,12 @@ fun ChatRoot(store: SessionStore, onArrowShort: () -> Unit, onLogout: () -> Unit
         }
     }
     val downAt = remember { mutableStateOf(0L) }
+    val meId = remember { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(Unit) {
         try {
+            val profile = client.call { auth -> me(auth) }
+            meId.value = (profile["id"] as Number).toLong()
             val list = client.call { auth -> dialogs(auth) }
             dialogs.clear(); dialogs.addAll(list)
             if (list.size == 1) {
@@ -102,6 +113,49 @@ fun ChatRoot(store: SessionStore, onArrowShort: () -> Unit, onLogout: () -> Unit
                 loadMsgs(client, list[0]["id"].toString().toDouble().toLong(), messages)
             }
         } catch (_: Exception) { }
+    }
+
+    DisposableEffect(Unit) {
+        val listener = object : WebSocketListener() {
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                val data = try { JSONObject(text) } catch (_: Exception) { return }
+                val event = data.optString("event")
+                scope.launch(Dispatchers.Main) {
+                    if (event == "message") {
+                        val msg = jsonToMap(data.getJSONObject("message"))
+                        val author = (msg["author_id"] as Number).toLong()
+                        val dialogId = (msg["dialog_id"] as Number).toLong()
+                        val activeId = (active.value?.get("id") as? Number)?.toLong()
+                        if (dialogId == activeId && messages.none { (it["id"] as Number).toLong() == (msg["id"] as Number).toLong() }) {
+                            messages.add(msg)
+                        }
+                        if (author != meId.value && dialogId == activeId) {
+                            try {
+                                client.call { auth -> read(auth, dialogId, mapOf("up_to_id" to (msg["id"] as Number).toLong())) }
+                            } catch (_: Exception) { }
+                        }
+                    }
+                    if (event == "delivered" || event == "read") {
+                        val ids = mutableListOf<Long>()
+                        if (data.has("ids")) {
+                            val arr = data.getJSONArray("ids")
+                            for (i in 0 until arr.length()) ids.add(arr.getLong(i))
+                        } else if (data.has("id")) {
+                            ids.add(data.getLong("id"))
+                        }
+                        val tick = if (event == "read") "read" else "delivered"
+                        for (i in messages.indices) {
+                            val id = (messages[i]["id"] as Number).toLong()
+                            if (id !in ids) continue
+                            if (tick == "delivered" && messages[i]["ticks"] == "read") continue
+                            messages[i] = messages[i].toMutableMap().apply { put("ticks", tick) }
+                        }
+                    }
+                }
+            }
+        }
+        val socket = openWs(store.access, listener)
+        onDispose { socket.cancel() }
     }
 
     if (settings.value) {
@@ -188,12 +242,14 @@ fun ChatRoot(store: SessionStore, onArrowShort: () -> Unit, onLogout: () -> Unit
                 items(messages.reversed()) { m ->
                     val mine = (m["author_id"] as Number).toLong()
                     val ticks = m["ticks"] as? String ?: ""
+                    val ticksColor = if (ticks == "read") Color(0xFF4FAEEF) else MaterialTheme.colorScheme.onSurfaceVariant
                     Column(Modifier.fillMaxWidth().padding(8.dp)) {
                         Text((m["text"] ?: "").toString())
                         Text(
-                            (if (ticks == "read") "✓✓" else if (ticks == "delivered") "✓✓" else if (ticks == "sent") "✓" else "") +
+                            (if (ticks == "read" || ticks == "delivered") "✓✓" else if (ticks == "sent") "✓" else "") +
                                 if (m["edited_at"] != null) " изменено" else "",
                             style = MaterialTheme.typography.labelSmall,
+                            color = ticksColor,
                         )
                     }
                 }
@@ -226,4 +282,22 @@ private suspend fun loadMsgs(client: TokenClient, id: Long, messages: MutableLis
     messages.clear()
     messages.addAll(list)
     client.call { auth -> read(auth, id, emptyMap()) }
+}
+
+/**
+ * Разобрать кадр WebSocket в словарь для списка сообщений.
+ */
+private fun jsonToMap(obj: JSONObject): Map<String, Any> {
+    val map = mutableMapOf<String, Any>()
+    val keys = obj.keys()
+    while (keys.hasNext()) {
+        val k = keys.next()
+        map[k] = when (val v = obj.get(k)) {
+            is JSONObject -> jsonToMap(v)
+            is JSONArray -> (0 until v.length()).map { v.get(it) }
+            JSONObject.NULL -> ""
+            else -> v
+        }
+    }
+    return map
 }

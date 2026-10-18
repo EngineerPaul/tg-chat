@@ -6,6 +6,7 @@ import { api, jsonOrThrow, logout } from "@/lib/api";
 import { cacheDelete, cacheMessages, loadCached } from "@/lib/cache";
 import { compressPhoto, maybeGzip } from "@/lib/compress";
 import { avatarColor, lastSeenText, shortTime } from "@/lib/format";
+import { playIncoming, setTabAlert, unlockAudio } from "@/lib/notify";
 import { getAccess, getTheme, setTheme as persistTheme } from "@/lib/storage";
 
 type User = {
@@ -101,7 +102,9 @@ export default function ChatApp() {
   const [viewerIdx, setViewerIdx] = useState(0);
   const [typing, setTyping] = useState(false);
   const [narrowList, setNarrowList] = useState(false);
+  const [flash, setFlash] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const dialogsRef = useRef<DialogRow[]>([]);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const typingTimer = useRef<number | null>(null);
   const activeIdRef = useRef<number | null>(null);
@@ -109,6 +112,7 @@ export default function ChatApp() {
   const applyIncomingRef = useRef<(msg: Msg) => void>(() => undefined);
   activeIdRef.current = active?.id ?? null;
   meIdRef.current = me?.id ?? null;
+  dialogsRef.current = dialogs;
 
   /**
    * Подгрузить профиль и список диалогов.
@@ -134,8 +138,28 @@ export default function ChatApp() {
     const t = getTheme();
     setTheme(t);
     document.documentElement.setAttribute("data-theme", t);
+    const unlock = () => unlockAudio();
+    window.addEventListener("pointerdown", unlock, { once: true });
     boot();
+    return () => window.removeEventListener("pointerdown", unlock);
   }, [boot]);
+
+  useEffect(() => {
+    const unread = dialogs.reduce((sum, d) => sum + d.unread, 0);
+    setTabAlert(unread, document.hidden);
+  }, [dialogs]);
+
+  useEffect(() => {
+    /**
+     * Когда вкладку снова открыли — убрать мигание заголовка.
+     */
+    function onVis() {
+      const unread = dialogsRef.current.reduce((sum, d) => sum + d.unread, 0);
+      setTabAlert(unread, document.hidden);
+    }
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
 
   /**
    * Открыть диалог и загрузить хвост истории.
@@ -219,12 +243,17 @@ export default function ChatApp() {
         if (data.event === "message") {
           const msg = normalizeMsg(data.message as Msg);
           applyIncomingRef.current(msg);
-          if (msg.dialog_id === activeIdRef.current && msg.author_id !== meIdRef.current) {
-            api(`/dialogs/${msg.dialog_id}/read`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ up_to_id: msg.id }),
-            });
+          if (msg.author_id !== meIdRef.current) {
+            playIncoming();
+            setFlash(true);
+            window.setTimeout(() => setFlash(false), 600);
+            if (msg.dialog_id === activeIdRef.current) {
+              api(`/dialogs/${msg.dialog_id}/read`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ up_to_id: msg.id }),
+              });
+            }
           }
         }
         if (data.event === "edited") {
@@ -240,9 +269,15 @@ export default function ChatApp() {
           cacheDelete(data.id);
         }
         if (data.event === "delivered" || data.event === "read") {
-          const ids: number[] = data.ids || (data.id ? [data.id] : []);
+          const ids = (data.ids || (data.id != null ? [data.id] : [])).map(Number);
           const tick = data.event === "read" ? "read" : "delivered";
-          setMessages((cur) => cur.map((m) => (ids.includes(m.id) ? { ...m, ticks: tick } : m)));
+          setMessages((cur) =>
+            cur.map((m) => {
+              if (!ids.includes(m.id)) return m;
+              if (tick === "delivered" && m.ticks === "read") return m;
+              return { ...m, ticks: tick };
+            }),
+          );
         }
         if (data.event === "typing" && data.dialog_id === activeIdRef.current) {
           setTyping(true);
@@ -476,7 +511,7 @@ export default function ChatApp() {
   return (
     <div className="app">
       <aside className={`sidebar ${!active || narrowList ? "show" : ""}`}>
-        <div className="topbar">
+        <div className={`topbar ${flash ? "flash" : ""}`}>
           <strong>Чат</strong>
           <button className="iconbtn" type="button" onClick={() => setSettings(true)}>⚙</button>
         </div>
@@ -502,7 +537,7 @@ export default function ChatApp() {
       <section className="main">
         {active ? (
           <>
-            <div className="topbar">
+            <div className={`topbar ${flash ? "flash" : ""}`}>
               <button className="iconbtn" type="button" onClick={() => { setActive(null); setNarrowList(true); }}>←</button>
               <Avatar user={active.peer} />
               <div>
@@ -549,7 +584,12 @@ export default function ChatApp() {
                     </div>
                   ) : null}
                   {m.text ? <div>{m.text}{m.edited_at ? " (изменено)" : ""}</div> : null}
-                  <div className="time">{shortTime(m.created_at)} {m.author_id === me.id ? (m.ticks === "read" ? "✓✓" : m.ticks === "delivered" ? "✓✓" : "✓") : ""}</div>
+                  <div className="time">
+                    {shortTime(m.created_at)}
+                    {m.author_id === me.id ? (
+                      <span className={`ticks ${m.ticks}`}>{m.ticks === "sent" ? "✓" : "✓✓"}</span>
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </div>
