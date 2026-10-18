@@ -29,7 +29,11 @@ jobs:
         run: docker compose build
 
       - name: Check nginx config
-        run: docker compose run --rm --no-deps chat nginx -t
+        run: >
+          docker compose run --rm --no-deps
+          --add-host chat-backend:127.0.0.1
+          --add-host chat-web:127.0.0.1
+          chat nginx -t
 
   deploy:
     name: Deploy (SSH -> docker compose)
@@ -47,7 +51,7 @@ jobs:
           script_stop: true
           script: |
             export DEPLOY_PATH='${{ secrets.DEPLOY_PATH }}'
-            if [ -z "$DEPLOY_PATH" ]; then export DEPLOY_PATH="/var/www/Diary-project/TG-chat"; fi
+            if [ -z "$DEPLOY_PATH" ]; then export DEPLOY_PATH="/var/www/Diary-project/tg-chat"; fi
             export DEPLOY_BRANCH='${{ secrets.DEPLOY_BRANCH }}'
             if [ -z "$DEPLOY_BRANCH" ]; then export DEPLOY_BRANCH="master"; fi
             cd "$DEPLOY_PATH"

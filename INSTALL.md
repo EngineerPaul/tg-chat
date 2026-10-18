@@ -12,7 +12,7 @@ docker network create extra_services
 ```
 
 - Хостовый nginx с HTTPS (сертификаты уже на `daystream.ru`)
-- Клон репозитория, например `/var/www/Diary-project/TG-chat`
+- Клон репозитория, например `/var/www/Diary-project/tg-chat`
 
 ## 2. Секреты GitHub (CI/CD)
 
@@ -24,7 +24,7 @@ docker network create extra_services
 | `SSH_USER` | пользователь SSH |
 | `SSH_PORT` | обычно 22 |
 | `SSH_PRIVATE_KEY` | ключ CI |
-| `DEPLOY_PATH` | каталог на сервере, по умолчанию `/var/www/Diary-project/TG-chat` |
+| `DEPLOY_PATH` | каталог на сервере, по умолчанию `/var/www/Diary-project/tg-chat` |
 | `DEPLOY_BRANCH` | необязательно, `master` |
 
 На сервере до первого pipeline: клон в `DEPLOY_PATH`, `git fetch` без пароля, сеть `extra_services`, кусок хостового nginx (ниже).
@@ -62,7 +62,7 @@ location = /extra/chat {
 На сервере:
 
 ```bash
-cd /var/www/Diary-project/TG-chat
+cd /var/www/Diary-project/tg-chat
 cp .env.example .env
 # в .env задайте JWT_SECRET — длинная случайная строка
 docker network create extra_services 2>/dev/null || true
@@ -102,7 +102,7 @@ docker compose exec backend python scripts/create_user.py Логин "парол
 5. Скопировать APK на сервер:
 
 ```bash
-cp app/build/outputs/apk/debug/app-debug.apk /var/www/Diary-project/TG-chat/deploy/apk/chat.apk
+cp app/build/outputs/apk/debug/app-debug.apk /var/www/Diary-project/tg-chat/deploy/apk/chat.apk
 ```
 
 Имя файла на сервере должно быть `deploy/apk/chat.apk`. Ссылка: `https://daystream.ru/extra/chat/chat.apk`.

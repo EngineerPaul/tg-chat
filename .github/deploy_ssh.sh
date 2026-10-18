@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DEPLOY_PATH="${DEPLOY_PATH:-/var/www/Diary-project/TG-chat}"
+DEPLOY_PATH="${DEPLOY_PATH:-/var/www/Diary-project/tg-chat}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-master}"
 
 cd "$DEPLOY_PATH"
