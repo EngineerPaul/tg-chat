@@ -53,27 +53,30 @@ def mark_delivered(db: Session, message: Message, user_id: int) -> None:
 
 
 def mark_read(db: Session, dialog_id: int, user_id: int, up_to_id: int | None) -> list[int]:
-    """Прочитать входящие. Вернуть id сообщений, у которых впервые появился read."""
-    q = (
-        db.query(MessageReceipt)
-        .join(Message, Message.id == MessageReceipt.message_id)
-        .filter(
-            Message.dialog_id == dialog_id,
-            Message.author_id != user_id,
-            MessageReceipt.user_id == user_id,
-            MessageReceipt.read_at.is_(None),
-            Message.deleted_at.is_(None),
-        )
+    """Прочитать входящие. Создать отсутствующие квитанции. Вернуть id с новым read."""
+    incoming = db.query(Message).filter(
+        Message.dialog_id == dialog_id,
+        Message.author_id != user_id,
+        Message.deleted_at.is_(None),
     )
     if up_to_id:
-        q = q.filter(Message.id <= up_to_id)
+        incoming = incoming.filter(Message.id <= up_to_id)
     changed: list[int] = []
     now = utcnow()
-    for rec in q.all():
-        rec.read_at = now
-        if rec.delivered_at is None:
-            rec.delivered_at = now
-        changed.append(rec.message_id)
+    for msg in incoming.all():
+        rec = (
+            db.query(MessageReceipt)
+            .filter(MessageReceipt.message_id == msg.id, MessageReceipt.user_id == user_id)
+            .first()
+        )
+        if rec is None:
+            rec = MessageReceipt(message_id=msg.id, user_id=user_id)
+            db.add(rec)
+        if rec.read_at is None:
+            rec.read_at = now
+            if rec.delivered_at is None:
+                rec.delivered_at = now
+            changed.append(msg.id)
     db.commit()
     return changed
 

@@ -138,10 +138,17 @@ export default function ChatApp() {
     const t = getTheme();
     setTheme(t);
     document.documentElement.setAttribute("data-theme", t);
+    unlockAudio();
     const unlock = () => unlockAudio();
-    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("pointerdown", unlock);
+    window.addEventListener("keydown", unlock);
+    window.addEventListener("touchstart", unlock);
     boot();
-    return () => window.removeEventListener("pointerdown", unlock);
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+      window.removeEventListener("touchstart", unlock);
+    };
   }, [boot]);
 
   useEffect(() => {
@@ -194,7 +201,7 @@ export default function ChatApp() {
     else setMessages([]);
     const data = await jsonOrThrow<{ messages: Msg[] }>(await api(`/dialogs/${row.id}/messages?limit=50`));
     if (activeIdRef.current !== row.id) return;
-    setMessages((cur) => mergeMessages(data.messages, cur.filter((m) => m.dialog_id === row.id)));
+    setMessages((cur) => mergeMessages(cur.filter((m) => m.dialog_id === row.id), data.messages));
     await cacheMessages(row.id, data.messages);
     await api(`/dialogs/${row.id}/read`, {
       method: "POST",
@@ -290,13 +297,16 @@ export default function ChatApp() {
         if (data.event === "delivered" || data.event === "read") {
           const ids = (data.ids || (data.id != null ? [data.id] : [])).map(Number);
           const tick = data.event === "read" ? "read" : "delivered";
-          setMessages((cur) =>
-            cur.map((m) => {
+          setMessages((cur) => {
+            const next = cur.map((m) => {
               if (!ids.includes(m.id)) return m;
               if (tick === "delivered" && m.ticks === "read") return m;
               return { ...m, ticks: tick };
-            }),
-          );
+            });
+            const changed = next.filter((m) => ids.includes(m.id));
+            if (changed.length) void cacheMessages(changed[0].dialog_id, changed);
+            return next;
+          });
         }
         if (data.event === "typing" && data.dialog_id === activeIdRef.current) {
           setTyping(true);

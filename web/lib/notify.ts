@@ -4,8 +4,8 @@
  */
 
 const TITLE = "Чат";
-let audio: AudioContext | null = null;
 let blink: number | null = null;
+let wavUrl: string | null = null;
 
 /**
  * Страница чата на экране и в фокусе. Другая вкладка или окно — нет.
@@ -15,32 +15,61 @@ export function chatInForeground(): boolean {
 }
 
 /**
- * Разрешить звук после первого клика (политика автовоспроизведения).
+ * Собрать короткий WAV двух тонов.
  */
-export function unlockAudio(): void {
-  if (!audio) audio = new AudioContext();
-  if (audio.state === "suspended") void audio.resume();
+function incomingWavUrl(): string {
+  if (wavUrl) return wavUrl;
+  const rate = 22050;
+  const n = Math.floor(rate * 0.28);
+  const pcm = new Int16Array(n);
+  for (let i = 0; i < n; i += 1) {
+    const t = i / rate;
+    const freq = t < 0.09 ? 880 : 1175;
+    const env = t < 0.02 ? t / 0.02 : Math.max(0, 1 - t / 0.28);
+    pcm[i] = Math.round(Math.sin(2 * Math.PI * freq * t) * env * 0.28 * 32767);
+  }
+  const bytes = new Uint8Array(44 + n * 2);
+  const view = new DataView(bytes.buffer);
+  const write = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i += 1) bytes[offset + i] = text.charCodeAt(i);
+  };
+  write(0, "RIFF");
+  view.setUint32(4, 36 + n * 2, true);
+  write(8, "WAVE");
+  write(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  write(36, "data");
+  view.setUint32(40, n * 2, true);
+  bytes.set(new Uint8Array(pcm.buffer), 44);
+  wavUrl = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
+  return wavUrl;
 }
 
 /**
- * Короткий двухтональный сигнал входящего.
+ * Попытка разблокировать звук. Без жеста браузер может отказать — тогда тишина, не отложенный сигнал.
+ */
+export function unlockAudio(): void {
+  const probe = new Audio(incomingWavUrl());
+  probe.volume = 0.01;
+  void probe.play().then(() => {
+    probe.pause();
+    probe.currentTime = 0;
+  }).catch(() => undefined);
+}
+
+/**
+ * Короткий сигнал входящего. Если автоплей запрещён — не ставим в очередь.
  */
 export function playIncoming(): void {
-  unlockAudio();
-  if (!audio) return;
-  const now = audio.currentTime;
-  const osc = audio.createOscillator();
-  const gain = audio.createGain();
-  osc.type = "sine";
-  osc.frequency.setValueAtTime(880, now);
-  osc.frequency.setValueAtTime(1175, now + 0.08);
-  gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(0.12, now + 0.015);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
-  osc.connect(gain);
-  gain.connect(audio.destination);
-  osc.start(now);
-  osc.stop(now + 0.28);
+  const tone = new Audio(incomingWavUrl());
+  tone.volume = 0.45;
+  void tone.play().catch(() => undefined);
 }
 
 /**
