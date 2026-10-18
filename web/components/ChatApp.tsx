@@ -151,10 +151,19 @@ export default function ChatApp() {
 
   useEffect(() => {
     /**
-     * Когда вкладку снова открыли — убрать мигание заголовка.
+     * Вкладку снова открыли: прочитать активный чат и снять бейдж.
      */
     function onVis() {
-      const unread = dialogsRef.current.reduce((sum, d) => sum + d.unread, 0);
+      if (!document.hidden && activeIdRef.current) {
+        const id = activeIdRef.current;
+        void api(`/dialogs/${id}/read`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        setDialogs((list) => list.map((d) => (d.id === id ? { ...d, unread: 0 } : d)));
+      }
+      const unread = dialogsRef.current.reduce((sum, d) => sum + (d.id === activeIdRef.current && !document.hidden ? 0 : d.unread), 0);
       setTabAlert(unread, document.hidden);
     }
     document.addEventListener("visibilitychange", onVis);
@@ -196,14 +205,14 @@ export default function ChatApp() {
     }
     setDialogs((list) => {
       const mine = msg.author_id === meIdRef.current;
-      const open = activeIdRef.current === msg.dialog_id;
+      const looking = activeIdRef.current === msg.dialog_id && !document.hidden;
       const next = list.map((d) =>
         d.id === msg.dialog_id
           ? {
               ...d,
               last_message: preview(msg),
               last_at: msg.created_at,
-              unread: mine || open ? (open ? 0 : d.unread) : d.unread + 1,
+              unread: mine || looking ? 0 : d.unread + 1,
             }
           : d,
       );
@@ -247,7 +256,7 @@ export default function ChatApp() {
             playIncoming();
             setFlash(true);
             window.setTimeout(() => setFlash(false), 600);
-            if (msg.dialog_id === activeIdRef.current) {
+            if (msg.dialog_id === activeIdRef.current && !document.hidden) {
               api(`/dialogs/${msg.dialog_id}/read`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },

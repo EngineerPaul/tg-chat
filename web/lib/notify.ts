@@ -38,36 +38,39 @@ export function playIncoming(): void {
 
 /**
  * Нарисовать иконку вкладки, при непрочитанных — красная точка.
+ * Ссылку меняем целиком: Chrome кэширует старый href.
  * @param marked есть непрочитанные
  */
 function setFavicon(marked: boolean): void {
-  let link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
-  if (!link) {
-    link = document.createElement("link");
-    link.rel = "icon";
-    document.head.appendChild(link);
-  }
   const canvas = document.createElement("canvas");
-  canvas.width = 32;
-  canvas.height = 32;
+  canvas.width = 64;
+  canvas.height = 64;
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   ctx.fillStyle = "#3390ec";
   ctx.beginPath();
-  ctx.arc(16, 16, 14, 0, Math.PI * 2);
+  ctx.arc(32, 32, 28, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = "#fff";
-  ctx.font = "bold 16px sans-serif";
+  ctx.font = "bold 32px sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("C", 16, 17);
+  ctx.fillText("C", 32, 34);
   if (marked) {
     ctx.fillStyle = "#e53935";
     ctx.beginPath();
-    ctx.arc(24, 8, 6, 0, Math.PI * 2);
+    ctx.arc(50, 14, 13, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 3;
+    ctx.stroke();
   }
-  link.href = canvas.toDataURL("image/png");
+  document.querySelectorAll("link[rel*='icon']").forEach((el) => el.remove());
+  const link = document.createElement("link");
+  link.rel = "icon";
+  link.type = "image/png";
+  link.href = `${canvas.toDataURL("image/png")}#${marked ? "on" : "off"}`;
+  document.head.appendChild(link);
 }
 
 /**
