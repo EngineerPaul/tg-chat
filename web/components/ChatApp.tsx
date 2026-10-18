@@ -53,6 +53,29 @@ type DialogRow = {
 };
 
 /**
+ * Превью для списка диалогов.
+ * @param msg сообщение
+ */
+function preview(msg: Msg): string {
+  if (msg.type === "photo") return "Фото";
+  if (msg.type === "video") return "Видео";
+  if (msg.type === "file") return msg.attachments[0]?.orig_name || "Файл";
+  if (msg.type === "album") return "Альбом";
+  return msg.text || "";
+}
+
+/**
+ * Слить пачки сообщений по id, порядок по возрастанию.
+ */
+function mergeMessages(...batches: Msg[][]): Msg[] {
+  const byId = new Map<number, Msg>();
+  for (const batch of batches) {
+    for (const m of batch) byId.set(m.id, m);
+  }
+  return [...byId.values()].sort((a, b) => a.id - b.id);
+}
+
+/**
  * Веб-клиент: список слева, переписка справа, без калькулятора.
  */
 export default function ChatApp() {
@@ -74,6 +97,10 @@ export default function ChatApp() {
   const wsRef = useRef<WebSocket | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const typingTimer = useRef<number | null>(null);
+  const activeIdRef = useRef<number | null>(null);
+  const meIdRef = useRef<number | null>(null);
+  activeIdRef.current = active?.id ?? null;
+  meIdRef.current = me?.id ?? null;
 
   /**
    * Подгрузить профиль и список диалогов.
@@ -88,10 +115,11 @@ export default function ChatApp() {
       router.replace("/login");
       return;
     }
-    setMe(await meRes.json());
+    const profile = await meRes.json();
+    setMe(profile);
     const list = await jsonOrThrow<DialogRow[]>(await api("/dialogs"));
     setDialogs(list);
-    if (list.length === 1) setActive(list[0]);
+    if (list.length === 1) void openDialog(list[0]);
   }, [router]);
 
   useEffect(() => {
@@ -107,11 +135,15 @@ export default function ChatApp() {
    */
   async function openDialog(row: DialogRow) {
     setActive(row);
+    activeIdRef.current = row.id;
     setNarrowList(false);
     const cached = (await loadCached(row.id)) as Msg[];
+    if (activeIdRef.current !== row.id) return;
     if (cached.length) setMessages(cached);
+    else setMessages([]);
     const data = await jsonOrThrow<{ messages: Msg[] }>(await api(`/dialogs/${row.id}/messages?limit=50`));
-    setMessages(data.messages);
+    if (activeIdRef.current !== row.id) return;
+    setMessages((cur) => mergeMessages(data.messages, cur.filter((m) => m.dialog_id === row.id)));
     await cacheMessages(row.id, data.messages);
     await api(`/dialogs/${row.id}/read`, {
       method: "POST",
@@ -119,6 +151,32 @@ export default function ChatApp() {
       body: JSON.stringify({}),
     });
     setDialogs((d) => d.map((x) => (x.id === row.id ? { ...x, unread: 0 } : x)));
+  }
+
+  /**
+   * Показать сообщение в открытом чате и обновить превью слева.
+   * @param msg новое или своё только что отправленное
+   */
+  function applyIncoming(msg: Msg) {
+    if (msg.dialog_id === activeIdRef.current) {
+      setMessages((cur) => (cur.some((m) => m.id === msg.id) ? cur : [...cur, msg]));
+    }
+    setDialogs((list) => {
+      const mine = msg.author_id === meIdRef.current;
+      const open = activeIdRef.current === msg.dialog_id;
+      const next = list.map((d) =>
+        d.id === msg.dialog_id
+          ? {
+              ...d,
+              last_message: preview(msg),
+              last_at: msg.created_at,
+              unread: mine || open ? (open ? 0 : d.unread) : d.unread + 1,
+            }
+          : d,
+      );
+      return next.sort((a, b) => (b.last_at || "").localeCompare(a.last_at || ""));
+    });
+    void cacheMessages(msg.dialog_id, [msg]);
   }
 
   /**
@@ -139,9 +197,10 @@ export default function ChatApp() {
     if (!me) return;
     let closed = false;
     /**
-     * Поднять WebSocket с текущим access.
+     * Поднять WebSocket с текущим access. Не пересоздавать при смене чата.
      */
     function connect() {
+      if (closed) return;
       const proto = location.protocol === "https:" ? "wss" : "ws";
       const ws = new WebSocket(`${proto}://${location.host}/extra/chat/api/ws?token=${encodeURIComponent(getAccess())}`);
       wsRef.current = ws;
@@ -149,35 +208,25 @@ export default function ChatApp() {
         const data = JSON.parse(ev.data);
         if (data.event === "message") {
           const msg = data.message as Msg;
-          setMessages((cur) => (cur.some((m) => m.id === msg.id) ? cur : [...cur, msg]));
-          setDialogs((list) => {
-            const next = list.map((d) =>
-              d.id === msg.dialog_id
-                ? {
-                    ...d,
-                    last_message: preview(msg),
-                    last_at: msg.created_at,
-                    unread: active?.id === msg.dialog_id || msg.author_id === me?.id ? d.unread : d.unread + 1,
-                  }
-                : d,
-            );
-            return next.sort((a, b) => (b.last_at || "").localeCompare(a.last_at || ""));
-          });
-          if (active?.id === msg.dialog_id && msg.author_id !== me?.id) {
+          applyIncoming(msg);
+          if (msg.dialog_id === activeIdRef.current && msg.author_id !== meIdRef.current) {
             api(`/dialogs/${msg.dialog_id}/read`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ up_to_id: msg.id }),
             });
           }
-          cacheMessages(msg.dialog_id, [msg]);
         }
         if (data.event === "edited") {
           const msg = data.message as Msg;
-          setMessages((cur) => cur.map((m) => (m.id === msg.id ? msg : m)));
+          if (msg.dialog_id === activeIdRef.current) {
+            setMessages((cur) => cur.map((m) => (m.id === msg.id ? msg : m)));
+          }
         }
         if (data.event === "deleted") {
-          setMessages((cur) => cur.filter((m) => m.id !== data.id));
+          if (!data.dialog_id || data.dialog_id === activeIdRef.current) {
+            setMessages((cur) => cur.filter((m) => m.id !== data.id));
+          }
           cacheDelete(data.id);
         }
         if (data.event === "delivered" || data.event === "read") {
@@ -185,7 +234,7 @@ export default function ChatApp() {
           const tick = data.event === "read" ? "read" : "delivered";
           setMessages((cur) => cur.map((m) => (ids.includes(m.id) ? { ...m, ticks: tick } : m)));
         }
-        if (data.event === "typing" && data.dialog_id === active?.id) {
+        if (data.event === "typing" && data.dialog_id === activeIdRef.current) {
           setTyping(true);
           if (typingTimer.current) window.clearTimeout(typingTimer.current);
           typingTimer.current = window.setTimeout(() => setTyping(false), 4000);
@@ -206,7 +255,7 @@ export default function ChatApp() {
         }
       };
       ws.onclose = () => {
-        if (!closed) setTimeout(connect, 2000);
+        if (wsRef.current === ws && !closed) setTimeout(connect, 2000);
       };
     }
     connect();
@@ -218,23 +267,11 @@ export default function ChatApp() {
       window.clearInterval(ping);
       wsRef.current?.close();
     };
-  }, [me, active?.id]);
+  }, [me]);
 
   useEffect(() => {
     boxRef.current?.scrollTo(0, boxRef.current.scrollHeight);
   }, [messages.length, active?.id]);
-
-  /**
-   * Превью для списка.
-   * @param msg сообщение
-   */
-  function preview(msg: Msg): string {
-    if (msg.type === "photo") return "Фото";
-    if (msg.type === "video") return "Видео";
-    if (msg.type === "file") return msg.attachments[0]?.orig_name || "Файл";
-    if (msg.type === "album") return "Альбом";
-    return msg.text || "";
-  }
 
   /**
    * Отправить текст или правку.
@@ -242,20 +279,26 @@ export default function ChatApp() {
   async function sendText() {
     if (!active || !text.trim()) return;
     if (editing) {
-      await api(`/messages/${editing.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.trim() }),
-      });
+      const updated = await jsonOrThrow<Msg>(
+        await api(`/messages/${editing.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: text.trim() }),
+        }),
+      );
+      setMessages((cur) => cur.map((m) => (m.id === updated.id ? updated : m)));
       setEditing(null);
       setText("");
       return;
     }
-    await api(`/dialogs/${active.id}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: text.trim(), reply_to_id: reply?.id }),
-    });
+    const created = await jsonOrThrow<Msg>(
+      await api(`/dialogs/${active.id}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text.trim(), reply_to_id: reply?.id }),
+      }),
+    );
+    applyIncoming(created);
     setText("");
     setReply(null);
   }
@@ -315,7 +358,8 @@ export default function ChatApp() {
     fd.append("caption", text);
     fd.append("already_compressed", "0");
     if (reply) fd.append("reply_to_id", String(reply.id));
-    await api(`/dialogs/${active.id}/media`, { method: "POST", body: fd });
+    const created = await jsonOrThrow<Msg>(await api(`/dialogs/${active.id}/media`, { method: "POST", body: fd }));
+    applyIncoming(created);
     setText("");
     setReply(null);
   }
@@ -337,7 +381,8 @@ export default function ChatApp() {
       fd.append("gzip_flag", packed.gzip ? "1" : "0");
       fd.append("orig_size", String(packed.origSize));
       fd.append("caption", text);
-      await api(`/dialogs/${active.id}/file`, { method: "POST", body: fd });
+      const created = await jsonOrThrow<Msg>(await api(`/dialogs/${active.id}/file`, { method: "POST", body: fd }));
+      applyIncoming(created);
     }
     setText("");
   }
