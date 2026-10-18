@@ -65,6 +65,13 @@ function preview(msg: Msg): string {
 }
 
 /**
+ * Привести id из JSON к числу — иначе сравнение с active не сходится.
+ */
+function normalizeMsg(raw: Msg): Msg {
+  return { ...raw, id: Number(raw.id), dialog_id: Number(raw.dialog_id), author_id: Number(raw.author_id) };
+}
+
+/**
  * Слить пачки сообщений по id, порядок по возрастанию.
  */
 function mergeMessages(...batches: Msg[][]): Msg[] {
@@ -99,6 +106,7 @@ export default function ChatApp() {
   const typingTimer = useRef<number | null>(null);
   const activeIdRef = useRef<number | null>(null);
   const meIdRef = useRef<number | null>(null);
+  const applyIncomingRef = useRef<(msg: Msg) => void>(() => undefined);
   activeIdRef.current = active?.id ?? null;
   meIdRef.current = me?.id ?? null;
 
@@ -157,7 +165,8 @@ export default function ChatApp() {
    * Показать сообщение в открытом чате и обновить превью слева.
    * @param msg новое или своё только что отправленное
    */
-  function applyIncoming(msg: Msg) {
+  function applyIncoming(raw: Msg) {
+    const msg = normalizeMsg(raw);
     if (msg.dialog_id === activeIdRef.current) {
       setMessages((cur) => (cur.some((m) => m.id === msg.id) ? cur : [...cur, msg]));
     }
@@ -178,6 +187,7 @@ export default function ChatApp() {
     });
     void cacheMessages(msg.dialog_id, [msg]);
   }
+  applyIncomingRef.current = applyIncoming;
 
   /**
    * Подгрузить старше при прокрутке вверх.
@@ -207,8 +217,8 @@ export default function ChatApp() {
       ws.onmessage = (ev) => {
         const data = JSON.parse(ev.data);
         if (data.event === "message") {
-          const msg = data.message as Msg;
-          applyIncoming(msg);
+          const msg = normalizeMsg(data.message as Msg);
+          applyIncomingRef.current(msg);
           if (msg.dialog_id === activeIdRef.current && msg.author_id !== meIdRef.current) {
             api(`/dialogs/${msg.dialog_id}/read`, {
               method: "POST",
