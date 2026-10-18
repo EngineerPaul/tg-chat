@@ -6,7 +6,7 @@ import { api, jsonOrThrow, logout } from "@/lib/api";
 import { cacheDelete, cacheMessages, loadCached } from "@/lib/cache";
 import { compressPhoto, maybeGzip } from "@/lib/compress";
 import { avatarColor, lastSeenText, shortTime } from "@/lib/format";
-import { playIncoming, setTabAlert, unlockAudio } from "@/lib/notify";
+import { chatInForeground, playIncoming, setTabAlert, unlockAudio } from "@/lib/notify";
 import { getAccess, getTheme, setTheme as persistTheme } from "@/lib/storage";
 
 type User = {
@@ -146,15 +146,16 @@ export default function ChatApp() {
 
   useEffect(() => {
     const unread = dialogs.reduce((sum, d) => sum + d.unread, 0);
-    setTabAlert(unread, document.hidden);
+    setTabAlert(unread, !chatInForeground());
   }, [dialogs]);
 
   useEffect(() => {
     /**
-     * Вкладку снова открыли: прочитать активный чат и снять бейдж.
+     * Вернулись на вкладку чата: прочитать активный диалог и снять бейдж.
      */
-    function onVis() {
-      if (!document.hidden && activeIdRef.current) {
+    function onPageView() {
+      const here = chatInForeground();
+      if (here && activeIdRef.current) {
         const id = activeIdRef.current;
         void api(`/dialogs/${id}/read`, {
           method: "POST",
@@ -163,11 +164,20 @@ export default function ChatApp() {
         });
         setDialogs((list) => list.map((d) => (d.id === id ? { ...d, unread: 0 } : d)));
       }
-      const unread = dialogsRef.current.reduce((sum, d) => sum + (d.id === activeIdRef.current && !document.hidden ? 0 : d.unread), 0);
-      setTabAlert(unread, document.hidden);
+      const unread = dialogsRef.current.reduce(
+        (sum, d) => sum + (d.id === activeIdRef.current && here ? 0 : d.unread),
+        0,
+      );
+      setTabAlert(unread, !here);
     }
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
+    document.addEventListener("visibilitychange", onPageView);
+    window.addEventListener("focus", onPageView);
+    window.addEventListener("blur", onPageView);
+    return () => {
+      document.removeEventListener("visibilitychange", onPageView);
+      window.removeEventListener("focus", onPageView);
+      window.removeEventListener("blur", onPageView);
+    };
   }, []);
 
   /**
@@ -205,7 +215,7 @@ export default function ChatApp() {
     }
     setDialogs((list) => {
       const mine = msg.author_id === meIdRef.current;
-      const looking = activeIdRef.current === msg.dialog_id && !document.hidden;
+      const looking = activeIdRef.current === msg.dialog_id && chatInForeground();
       const next = list.map((d) =>
         d.id === msg.dialog_id
           ? {
@@ -256,7 +266,7 @@ export default function ChatApp() {
             playIncoming();
             setFlash(true);
             window.setTimeout(() => setFlash(false), 600);
-            if (msg.dialog_id === activeIdRef.current && !document.hidden) {
+            if (msg.dialog_id === activeIdRef.current && chatInForeground()) {
               api(`/dialogs/${msg.dialog_id}/read`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },

@@ -8,6 +8,13 @@ let audio: AudioContext | null = null;
 let blink: number | null = null;
 
 /**
+ * Страница чата на экране и в фокусе. Другая вкладка или окно — нет.
+ */
+export function chatInForeground(): boolean {
+  return document.visibilityState === "visible" && document.hasFocus();
+}
+
+/**
  * Разрешить звук после первого клика (политика автовоспроизведения).
  */
 export function unlockAudio(): void {
