@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <files-path name="hidden" path="hidden/" />
-    <cache-path name="cache" path="." />
+    <!-- Только временные раскрытые копии для «Открыть». Скрытое хранилище сюда не отдаём. -->
+    <cache-path name="cache" path="reveal/" />
 </paths>

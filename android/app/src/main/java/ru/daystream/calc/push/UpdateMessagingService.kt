@@ -30,7 +30,7 @@ class UpdateMessagingService : FirebaseMessagingService() {
             Intent(this, target).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val n = NotificationCompat.Builder(this, "updates")
+        val n = NotificationCompat.Builder(this, ru.daystream.calc.ChatApp.CHANNEL_UPDATES)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("Обновления")
             .setContentText("Доступно новое обновление")

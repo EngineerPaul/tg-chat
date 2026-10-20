@@ -6,9 +6,11 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.UiState
+import ru.daystream.calc.sync.SyncService
 
 /**
  * Скрытая часть. FLAG_SECURE, чтобы в недавних не было переписки.
@@ -28,15 +30,23 @@ class ChatActivity : ComponentActivity() {
             }
         })
         val store = SessionStore(this)
+        val theme = ThemeStore(this)
         setContent {
-            MaterialTheme {
+            val themeMode = remember { mutableStateOf(theme.mode) }
+            AppTheme(themeMode.value) {
                 ChatRoot(
                     store = store,
+                    themeMode = themeMode,
+                    onThemeChange = {
+                        theme.mode = it
+                        themeMode.value = it
+                    },
                     onArrowShort = { closeLikeArrow() },
                     onLogout = {
                         store.clear()
                         UiState.chatOpen = false
-                        startActivity(Intent(this, ru.daystream.calc.ui.ShellActivity::class.java))
+                        stopService(Intent(this, SyncService::class.java))
+                        startActivity(Intent(this, ShellActivity::class.java))
                         finish()
                     },
                 )

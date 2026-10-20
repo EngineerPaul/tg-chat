@@ -4,64 +4,97 @@ import android.view.MotionEvent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
-import org.json.JSONArray
 import org.json.JSONObject
 import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.TokenClient
+import ru.daystream.calc.media.MediaVault
 import ru.daystream.calc.media.PhotoCompressor
 import ru.daystream.calc.net.openWs
+import java.io.ByteArrayOutputStream
+import java.util.zip.GZIPOutputStream
 
 /**
  * Скрытый чат: список и переписка.
  *
  * @param store сессия
+ * @param themeMode текущая тема
+ * @param onThemeChange сохранить тему
  * @param onArrowShort короткое нажатие стрелки
  * @param onLogout пункт «Выйти»
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
 @Composable
-fun ChatRoot(store: SessionStore, onArrowShort: () -> Unit, onLogout: () -> Unit) {
+fun ChatRoot(
+    store: SessionStore,
+    themeMode: MutableState<String>,
+    onThemeChange: (String) -> Unit,
+    onArrowShort: () -> Unit,
+    onLogout: () -> Unit,
+) {
     val client = remember { TokenClient(store) }
     val dialogs = remember { mutableStateListOf<Map<String, Any>>() }
     val messages = remember { mutableStateListOf<Map<String, Any>>() }
@@ -70,112 +103,244 @@ fun ChatRoot(store: SessionStore, onArrowShort: () -> Unit, onLogout: () -> Unit
     val text = remember { mutableStateOf("") }
     val search = remember { mutableStateOf("") }
     val settings = remember { mutableStateOf(false) }
+    val profile = remember { mutableStateOf(false) }
+    val nickDraft = remember { mutableStateOf("") }
+    val replyTo = remember { mutableStateOf<Map<String, Any>?>(null) }
+    val menuFor = remember { mutableStateOf<Map<String, Any>?>(null) }
+    val editFor = remember { mutableStateOf<Map<String, Any>?>(null) }
+    val editText = remember { mutableStateOf("") }
+    val typing = remember { mutableStateOf(false) }
+    val hasMore = remember { mutableStateOf(false) }
+    val loadingOlder = remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val meId = remember { mutableStateOf<Long?>(null) }
+    val socketRef = remember { mutableStateOf<WebSocket?>(null) }
+    val listState = rememberLazyListState()
+    val downAt = remember { mutableStateOf(0L) }
+    val dark = when (themeMode.value) {
+        "dark" -> true
+        "light" -> false
+        else -> isSystemInDarkTheme()
+    }
+    val chatBg = if (dark) ChatBgDark else ChatBgLight
+    val vault = remember { MediaVault(context) }
+    val readyTick = remember { mutableStateOf(0) }
+    val viewer = remember { mutableStateOf<Pair<List<ViewerItem>, Int>?>(null) }
+
     val photos = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         val dlg = active.value ?: return@rememberLauncherForActivityResult
+        val dialogId = dlg["id"].asLong() ?: return@rememberLauncherForActivityResult
         scope.launch {
-            val parts = uris.take(10).mapIndexed { i, uri ->
-                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@mapIndexed null
-                val jpeg = PhotoCompressor.compress(bytes)
-                MultipartBody.Part.createFormData(
-                    "files",
-                    "p$i.jpg",
-                    jpeg.toRequestBody("image/jpeg".toMediaType()),
-                )
-            }.filterNotNull()
-            if (parts.isNotEmpty()) {
-                client.call { auth ->
-                    sendMedia(
-                        auth,
-                        dlg["id"].toString().toDouble().toLong(),
-                        parts,
-                        text.value.toRequestBody(),
-                        "1".toRequestBody(),
+            try {
+                val local = mutableListOf<ByteArray>()
+                val parts = uris.take(10).mapIndexed { i, uri ->
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@mapIndexed null
+                    val jpeg = PhotoCompressor.compress(bytes)
+                    local.add(jpeg)
+                    MultipartBody.Part.createFormData(
+                        "files",
+                        "p$i.jpg",
+                        jpeg.toRequestBody("image/jpeg".toMediaType()),
                     )
+                }.filterNotNull()
+                if (parts.isNotEmpty()) {
+                    val sent = client.call { auth ->
+                        sendMedia(auth, dialogId, parts, text.value.toRequestBody(), "1".toRequestBody())
+                    }
+                    text.value = ""
+                    vault.ingestOutgoing(sent, local)
+                    upsertMessage(messages, sent)
+                    readyTick.value = readyTick.value + 1
                 }
-                loadMsgs(client, dlg["id"].toString().toDouble().toLong(), messages)
-            }
+            } catch (_: Exception) { }
         }
     }
-    val downAt = remember { mutableStateOf(0L) }
-    val meId = remember { mutableStateOf<Long?>(null) }
+    val files = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        val dlg = active.value ?: return@rememberLauncherForActivityResult
+        val dialogId = dlg["id"].asLong() ?: return@rememberLauncherForActivityResult
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            try {
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@launch
+                if (bytes.size > 50 * 1024 * 1024) return@launch
+                val name = uri.lastPathSegment?.substringAfterLast('/') ?: "file.bin"
+                val (payload, gzip) = maybeGzip(bytes)
+                val part = MultipartBody.Part.createFormData(
+                    "file",
+                    name,
+                    payload.toRequestBody("application/octet-stream".toMediaType()),
+                )
+                val sent = client.call { auth ->
+                    sendFile(
+                        auth,
+                        dialogId,
+                        part,
+                        text.value.toRequestBody(),
+                        (if (gzip) "1" else "0").toRequestBody(),
+                        bytes.size.toString().toRequestBody(),
+                    )
+                }
+                text.value = ""
+                vault.ingestOutgoing(sent, listOf(bytes))
+                upsertMessage(messages, sent)
+                readyTick.value = readyTick.value + 1
+            } catch (_: Exception) { }
+        }
+    }
 
     LaunchedEffect(Unit) {
         try {
-            val profile = client.call { auth -> me(auth) }
-            meId.value = (profile["id"] as Number).toLong()
-            val list = client.call { auth -> dialogs(auth) }
-            dialogs.clear(); dialogs.addAll(list)
+            val profileMe = client.call { auth -> me(auth) }
+            meId.value = profileMe["id"].asLong()
+            val list = asMapList(client.call { auth -> dialogs(auth) })
+            dialogs.clear()
+            dialogs.addAll(list)
             if (list.size == 1) {
                 active.value = list[0]
                 listMode.value = false
-                loadMsgs(client, list[0]["id"].toString().toDouble().toLong(), messages)
+                loadMsgs(client, list[0]["id"].asLong() ?: return@LaunchedEffect, messages, hasMore, vault) { readyTick.value = readyTick.value + 1 }
             }
         } catch (_: Exception) { }
     }
 
+    LaunchedEffect(messages.size, messages.lastOrNull()?.get("id"), listMode.value) {
+        if (listMode.value) return@LaunchedEffect
+        try {
+            vault.ensureMessages(messages.toList()) { readyTick.value = readyTick.value + 1 }
+        } catch (_: Exception) { }
+    }
+
+    LaunchedEffect(listState, listMode.value) {
+        snapshotFlow { listState.firstVisibleItemIndex to messages.size }
+            .distinctUntilChanged()
+            .collect { (index, size) ->
+                if (!listMode.value && hasMore.value && !loadingOlder.value && size > 0 && index >= size - 4) {
+                    val oldest = messages.minOfOrNull { it["id"].asLong() ?: Long.MAX_VALUE } ?: return@collect
+                    loadingOlder.value = true
+                    try {
+                        loadOlder(client, active.value?.get("id").asLong() ?: return@collect, oldest, messages, hasMore, vault) { readyTick.value = readyTick.value + 1 }
+                    } catch (_: Exception) {
+                    } finally {
+                        loadingOlder.value = false
+                    }
+                }
+            }
+    }
+
     DisposableEffect(Unit) {
         val listener = object : WebSocketListener() {
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                val data = try { JSONObject(text) } catch (_: Exception) { return }
+            override fun onMessage(webSocket: WebSocket, payload: String) {
+                val data = try { JSONObject(payload) } catch (_: Exception) { return }
                 val event = data.optString("event")
                 scope.launch(Dispatchers.Main) {
-                    if (event == "message") {
-                        val msg = jsonToMap(data.getJSONObject("message"))
-                        val author = (msg["author_id"] as Number).toLong()
-                        val dialogId = (msg["dialog_id"] as Number).toLong()
-                        val activeId = (active.value?.get("id") as? Number)?.toLong()
-                        if (dialogId == activeId && messages.none { (it["id"] as Number).toLong() == (msg["id"] as Number).toLong() }) {
-                            messages.add(msg)
+                    when (event) {
+                        "message" -> {
+                            val msg = jsonToMap(data.optJSONObject("message") ?: return@launch)
+                            val author = msg["author_id"].asLong()
+                            val dialogId = msg["dialog_id"].asLong()
+                            val activeId = active.value?.get("id").asLong()
+                            if (dialogId != null && dialogId == activeId) {
+                                upsertMessage(messages, msg)
+                                if (author != null && author != meId.value) {
+                                    val upTo = msg["id"].asLong()
+                                    if (upTo != null) {
+                                        try {
+                                            client.call { auth ->
+                                                read(auth, dialogId, mapOf<String, Any?>("up_to_id" to upTo))
+                                            }
+                                        } catch (_: Exception) { }
+                                    }
+                                }
+                            }
+                            refreshDialogPreview(dialogs, msg)
                         }
-                        if (author != meId.value && dialogId == activeId) {
-                            try {
-                                client.call { auth -> read(auth, dialogId, mapOf("up_to_id" to (msg["id"] as Number).toLong())) }
-                            } catch (_: Exception) { }
+                        "delivered", "read" -> {
+                            val ids = mutableListOf<Long>()
+                            if (data.has("ids")) {
+                                val arr = data.getJSONArray("ids")
+                                for (i in 0 until arr.length()) ids.add(arr.optLong(i))
+                            } else if (data.has("id")) {
+                                ids.add(data.optLong("id"))
+                            }
+                            val tick = if (event == "read") "read" else "delivered"
+                            for (i in messages.indices) {
+                                val id = messages[i]["id"].asLong() ?: continue
+                                if (id !in ids) continue
+                                if (tick == "delivered" && messages[i].str("ticks") == "read") continue
+                                messages[i] = messages[i].toMutableMap().apply { put("ticks", tick) }
+                            }
                         }
-                    }
-                    if (event == "delivered" || event == "read") {
-                        val ids = mutableListOf<Long>()
-                        if (data.has("ids")) {
-                            val arr = data.getJSONArray("ids")
-                            for (i in 0 until arr.length()) ids.add(arr.getLong(i))
-                        } else if (data.has("id")) {
-                            ids.add(data.getLong("id"))
+                        "typing" -> {
+                            val dialogId = data.optLong("dialog_id")
+                            if (dialogId == active.value?.get("id").asLong() && data.optLong("user_id") != meId.value) {
+                                typing.value = true
+                            }
                         }
-                        val tick = if (event == "read") "read" else "delivered"
-                        for (i in messages.indices) {
-                            val id = (messages[i]["id"] as Number).toLong()
-                            if (id !in ids) continue
-                            if (tick == "delivered" && messages[i]["ticks"] == "read") continue
-                            messages[i] = messages[i].toMutableMap().apply { put("ticks", tick) }
+                        "presence" -> {
+                            val uid = data.optLong("user_id")
+                            val online = data.optBoolean("online")
+                            val seen = data.optString("last_seen")
+                            updatePeerPresence(dialogs, active, uid, online, seen)
                         }
                     }
                 }
             }
         }
         val socket = openWs(store.access, listener)
-        onDispose { socket.cancel() }
+        socketRef.value = socket
+        onDispose {
+            socketRef.value = null
+            socket.cancel()
+        }
+    }
+
+    LaunchedEffect(typing.value) {
+        if (typing.value) {
+            kotlinx.coroutines.delay(3500)
+            typing.value = false
+        }
     }
 
     if (settings.value) {
-        Column(Modifier.fillMaxSize().padding(16.dp)) {
-            Text("Настройки", style = MaterialTheme.typography.titleLarge)
-            Text("Тема следует системной. Аватар загружается на сайте.")
-            androidx.compose.material3.Button(onClick = onLogout, modifier = Modifier.padding(top = 16.dp)) { Text("Выйти") }
-            androidx.compose.material3.TextButton(onClick = { settings.value = false }) { Text("Назад") }
-        }
+        SettingsPane(
+            themeMode = themeMode.value,
+            onTheme = onThemeChange,
+            onLogout = {
+                scope.launch {
+                    try {
+                        client.call { auth -> logout(auth, mapOf("refresh_token" to store.refresh)) }
+                    } catch (_: Exception) { }
+                    onLogout()
+                }
+            },
+            onBack = { settings.value = false },
+        )
         return
     }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Column(Modifier.fillMaxSize().background(if (listMode.value) MaterialTheme.colorScheme.background else chatBg).imePadding()) {
+        val peer = active.value?.map("peer")
         TopAppBar(
             title = {
-                val peer = (active.value?.get("peer") as? Map<*, *>)
-                Text(
-                    if (!listMode.value && peer != null) (peer["display_name"] ?: peer["login"]).toString()
-                    else "Чаты",
-                )
+                if (!listMode.value && peer != null) {
+                    Column(
+                        Modifier.clickable {
+                            nickDraft.value = peer["nick"]?.toString().orEmpty()
+                            profile.value = true
+                        },
+                    ) {
+                        Text((peer["display_name"] ?: peer["login"]).toString(), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            if (typing.value) "печатает…"
+                            else lastSeenText(peer["last_seen"]?.toString(), peer["online"] == true),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    Text("Чаты")
+                }
             },
             navigationIcon = {
                 IconButton(
@@ -198,6 +363,7 @@ fun ChatRoot(store: SessionStore, onArrowShort: () -> Unit, onLogout: () -> Unit
             actions = {
                 IconButton(onClick = { settings.value = true }) { Icon(Icons.Default.MoreVert, null) }
             },
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
         )
         if (listMode.value) {
             OutlinedTextField(
@@ -205,99 +371,434 @@ fun ChatRoot(store: SessionStore, onArrowShort: () -> Unit, onLogout: () -> Unit
                 { search.value = it },
                 label = { Text("Поиск по логину") },
                 modifier = Modifier.fillMaxWidth().padding(8.dp),
+                singleLine = true,
+                colors = readableFieldColors(),
                 trailingIcon = {
-                    IconButton(onClick = {
+                    TextButton(onClick = {
                         scope.launch {
-                            val d = client.call { auth -> openDialog(auth, mapOf("login" to search.value)) }
-                            dialogs.removeAll { it["id"] == d["id"] }
-                            dialogs.add(0, d)
-                            active.value = d
-                            listMode.value = false
-                            loadMsgs(client, d["id"].toString().toDouble().toLong(), messages)
+                            try {
+                                val d = client.call { auth -> openDialog(auth, mapOf("login" to search.value.trim())) }
+                                val row = d.toMutableMap()
+                                dialogs.removeAll { it["id"].asLong() == row["id"].asLong() }
+                                dialogs.add(0, row)
+                                active.value = row
+                                listMode.value = false
+                                loadMsgs(client, row["id"].asLong() ?: return@launch, messages, hasMore, vault) { readyTick.value = readyTick.value + 1 }
+                            } catch (_: Exception) { }
                         }
                     }) { Text("OK") }
                 },
             )
             LazyColumn {
-                items(dialogs) { d ->
-                    val peer = d["peer"] as Map<*, *>
-                    Row(
-                        Modifier.fillMaxWidth().padding(12.dp).combinedClickable(onClick = {
-                            active.value = d
-                            listMode.value = false
-                            scope.launch { loadMsgs(client, d["id"].toString().toDouble().toLong(), messages) }
-                        }),
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text((peer["display_name"] ?: peer["login"]).toString(), style = MaterialTheme.typography.titleMedium)
-                            Text((d["last_message"] ?: "").toString(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                itemsIndexed(dialogs, key = { _, d -> d["id"].asLong() ?: d.hashCode().toLong() }) { _, d ->
+                    DialogRow(d) {
+                        active.value = d
+                        listMode.value = false
+                        scope.launch {
+                            try {
+                                loadMsgs(client, d["id"].asLong() ?: return@launch, messages, hasMore, vault) { readyTick.value = readyTick.value + 1 }
+                            } catch (_: Exception) { }
                         }
-                        val unread = (d["unread"] as? Number)?.toInt() ?: 0
-                        if (unread > 0) Text(unread.toString(), color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
         } else {
-            LazyColumn(Modifier.weight(1f), reverseLayout = true) {
-                items(messages.reversed()) { m ->
-                    val mine = (m["author_id"] as Number).toLong()
-                    val ticks = m["ticks"] as? String ?: ""
-                    val ticksColor = if (ticks == "read") Color(0xFF4FAEEF) else MaterialTheme.colorScheme.onSurfaceVariant
-                    Column(Modifier.fillMaxWidth().padding(8.dp)) {
-                        Text((m["text"] ?: "").toString())
-                        Text(
-                            (if (ticks == "read" || ticks == "delivered") "✓✓" else if (ticks == "sent") "✓" else "") +
-                                if (m["edited_at"] != null) " изменено" else "",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = ticksColor,
-                        )
-                    }
+            val chronological = messages.sortedBy { it["id"].asLong() ?: 0L }
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                reverseLayout = true,
+                verticalArrangement = Arrangement.Top,
+            ) {
+                itemsIndexed(
+                    items = chronological.asReversed(),
+                    key = { _, m -> m["id"].asLong() ?: m.hashCode().toLong() },
+                ) { _, m ->
+                    MessageBubble(
+                        m = m,
+                        mine = m["author_id"].asLong() != null && m["author_id"].asLong() == meId.value,
+                        dark = dark,
+                        vault = vault,
+                        readyTick = readyTick.value,
+                        onLong = { menuFor.value = m },
+                        onOpenMedia = { items, start -> viewer.value = items to start },
+                    )
                 }
             }
-            Row(Modifier.padding(8.dp)) {
-                IconButton(onClick = { photos.launch("image/*") }) { Icon(Icons.Default.AttachFile, null) }
-                OutlinedTextField(text.value, { text.value = it }, modifier = Modifier.weight(1f), placeholder = { Text("Сообщение") })
+            menuFor.value?.let { target ->
+                val mine = target["author_id"].asLong() == meId.value
+                AlertDialog(
+                    onDismissRequest = { menuFor.value = null },
+                    title = { Text("Сообщение") },
+                    text = { Text(previewText(target), maxLines = 3, overflow = TextOverflow.Ellipsis) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            replyTo.value = target
+                            menuFor.value = null
+                        }) { Text("Ответить") }
+                    },
+                    dismissButton = {
+                        Row {
+                            if (mine && (target.str("type").ifBlank { "text" } == "text" || target.str("text").isNotBlank())) {
+                                TextButton(onClick = {
+                                    editFor.value = target
+                                    editText.value = target.str("text")
+                                    menuFor.value = null
+                                }) { Text("Изменить") }
+                            }
+                            TextButton(onClick = {
+                                val id = target["id"].asLong()
+                                menuFor.value = null
+                                if (id != null) {
+                                    scope.launch {
+                                        try {
+                                            client.call { auth -> delete(auth, id) }
+                                            messages.removeAll { it["id"].asLong() == id }
+                                        } catch (_: Exception) { }
+                                    }
+                                }
+                            }) { Text("Удалить") }
+                        }
+                    },
+                )
+            }
+            replyTo.value?.let { r ->
+                Row(
+                    Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Ответ: ${previewText(r)}", modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { replyTo.value = null }) { Text("×") }
+                }
+            }
+            Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                val attachMenu = remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { attachMenu.value = true }) { Icon(Icons.Default.AttachFile, contentDescription = "Вложение") }
+                    DropdownMenu(expanded = attachMenu.value, onDismissRequest = { attachMenu.value = false }) {
+                        DropdownMenuItem(text = { Text("Галерея") }, onClick = {
+                            attachMenu.value = false
+                            photos.launch("image/*")
+                        })
+                        DropdownMenuItem(text = { Text("Файл") }, onClick = {
+                            attachMenu.value = false
+                            files.launch("*/*")
+                        })
+                    }
+                }
+                OutlinedTextField(
+                    text.value,
+                    {
+                        text.value = it
+                        val id = active.value?.get("id").asLong()
+                        if (id != null && it.isNotBlank()) {
+                            socketRef.value?.send(JSONObject().put("event", "typing").put("dialog_id", id).toString())
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Сообщение") },
+                    colors = readableFieldColors(),
+                    maxLines = 4,
+                )
                 IconButton(onClick = {
                     val dlg = active.value ?: return@IconButton
+                    val bodyText = text.value.trim()
+                    if (bodyText.isBlank()) return@IconButton
+                    val dialogId = dlg["id"].asLong() ?: return@IconButton
+                    val replyId = replyTo.value?.get("id").asLong()
                     scope.launch {
-                        client.call { auth ->
-                            sendText(auth, dlg["id"].toString().toDouble().toLong(), mapOf("text" to text.value, "reply_to_id" to null))
-                        }
-                        text.value = ""
-                        loadMsgs(client, dlg["id"].toString().toDouble().toLong(), messages)
+                        try {
+                            val body = mutableMapOf<String, Any?>("text" to bodyText)
+                            if (replyId != null) body["reply_to_id"] = replyId
+                            val sent = client.call { auth -> sendText(auth, dialogId, body) }
+                            text.value = ""
+                            replyTo.value = null
+                            upsertMessage(messages, sent)
+                        } catch (_: Exception) { }
                     }
-                }) { Icon(Icons.Default.Send, null) }
+                }) { Icon(Icons.Default.Send, contentDescription = "Отправить") }
+            }
+        }
+    }
+
+    if (profile.value && active.value != null) {
+        AlertDialog(
+            onDismissRequest = { profile.value = false },
+            title = { Text("Профиль") },
+            text = {
+                Column {
+                    Text(active.value?.map("peer")?.get("login")?.toString() ?: "")
+                    OutlinedTextField(
+                        nickDraft.value,
+                        { nickDraft.value = it },
+                        label = { Text("Ник") },
+                        colors = readableFieldColors(),
+                        singleLine = true,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val id = active.value?.get("id").asLong()
+                    profile.value = false
+                    if (id != null) {
+                        scope.launch {
+                            try {
+                                client.call { auth -> alias(auth, id, mapOf("nick" to nickDraft.value)) }
+                                val peerMap = (active.value?.map("peer")?.toMutableMap() ?: return@launch)
+                                peerMap["nick"] = nickDraft.value
+                                peerMap["display_name"] = nickDraft.value.ifBlank { peerMap["login"].toString() }
+                                active.value = active.value!!.toMutableMap().apply { put("peer", peerMap) }
+                            } catch (_: Exception) { }
+                        }
+                    }
+                }) { Text("Сохранить") }
+            },
+            dismissButton = { TextButton(onClick = { profile.value = false }) { Text("Закрыть") } },
+        )
+    }
+    viewer.value?.let { (items, start) ->
+        MediaViewer(items, start, vault, readyTick.value) { viewer.value = null }
+    }
+    editFor.value?.let { target ->
+        AlertDialog(
+            onDismissRequest = { editFor.value = null },
+            title = { Text("Изменить") },
+            text = {
+                OutlinedTextField(editText.value, { editText.value = it }, colors = readableFieldColors())
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val id = target["id"].asLong()
+                    val next = editText.value.trim()
+                    editFor.value = null
+                    if (id != null && next.isNotBlank()) {
+                        scope.launch {
+                            try {
+                                val updated = client.call { auth -> edit(auth, id, mapOf("text" to next)) }
+                                upsertMessage(messages, updated)
+                            } catch (_: Exception) { }
+                        }
+                    }
+                }) { Text("Сохранить") }
+            },
+            dismissButton = { TextButton(onClick = { editFor.value = null }) { Text("Отмена") } },
+        )
+    }
+}
+
+@Composable
+private fun SettingsPane(themeMode: String, onTheme: (String) -> Unit, onLogout: () -> Unit, onBack: () -> Unit) {
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Text("Настройки", style = MaterialTheme.typography.titleLarge)
+        Text("Тема", modifier = Modifier.padding(top = 16.dp), style = MaterialTheme.typography.titleMedium)
+        Row {
+            listOf("system" to "Система", "light" to "Светлая", "dark" to "Тёмная").forEach { (id, label) ->
+                TextButton(onClick = { onTheme(id) }) {
+                    Text(if (themeMode == id) "• $label" else label)
+                }
+            }
+        }
+        Text("Аватар загружается на сайте.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+        Button(onClick = onLogout, modifier = Modifier.padding(top = 16.dp)) { Text("Выйти") }
+        TextButton(onClick = onBack) { Text("Назад") }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DialogRow(d: Map<String, Any>, onOpen: () -> Unit) {
+    val peer = d.map("peer")
+    val name = (peer?.get("display_name") ?: peer?.get("login") ?: "").toString()
+    val unread = d["unread"].asLong()?.toInt() ?: 0
+    val online = peer?.get("online") == true
+    Row(
+        Modifier.fillMaxWidth().combinedClickable(onClick = onOpen).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(48.dp)) {
+            Box(Modifier.fillMaxSize().clip(CircleShape).background(avatarColor(name.ifBlank { "?" })), contentAlignment = Alignment.Center) {
+                Text(name.take(1).uppercase(), color = Color.White, fontSize = 18.sp)
+            }
+            if (online) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .size(12.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF4CAF50)),
+                )
+            }
+        }
+        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(shortTime(d["last_at"]?.toString()), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text(
+                if (d["typing"] == true) "печатает…" else d.str("last_message"),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (unread > 0) {
+            Box(Modifier.padding(start = 8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary).padding(horizontal = 8.dp, vertical = 2.dp)) {
+                Text(unread.toString(), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelSmall)
             }
         }
     }
 }
 
-/**
- * Загрузить хвост истории и пометить прочитанным.
- */
-private suspend fun loadMsgs(client: TokenClient, id: Long, messages: MutableList<Map<String, Any>>) {
-    val data = client.call { auth -> messages(auth, id) }
-    @Suppress("UNCHECKED_CAST")
-    val list = data["messages"] as List<Map<String, Any>>
-    messages.clear()
-    messages.addAll(list)
-    client.call { auth -> read(auth, id, emptyMap()) }
-}
-
-/**
- * Разобрать кадр WebSocket в словарь для списка сообщений.
- */
-private fun jsonToMap(obj: JSONObject): Map<String, Any> {
-    val map = mutableMapOf<String, Any>()
-    val keys = obj.keys()
-    while (keys.hasNext()) {
-        val k = keys.next()
-        map[k] = when (val v = obj.get(k)) {
-            is JSONObject -> jsonToMap(v)
-            is JSONArray -> (0 until v.length()).map { v.get(it) }
-            JSONObject.NULL -> ""
-            else -> v
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MessageBubble(
+    m: Map<String, Any>,
+    mine: Boolean,
+    dark: Boolean,
+    vault: MediaVault,
+    readyTick: Int,
+    onLong: () -> Unit,
+    onOpenMedia: (List<ViewerItem>, Int) -> Unit,
+) {
+    val ticks = m.str("ticks")
+    val ticksColor = if (ticks == "read") TickRead else MaterialTheme.colorScheme.onSurfaceVariant
+    val bg = when {
+        mine && dark -> BubbleOutDark
+        mine -> BubbleOutLight
+        dark -> BubbleInDark
+        else -> BubbleInLight
+    }
+    val reply = m.map("reply_to")
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp),
+        horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
+    ) {
+        Column(
+            Modifier
+                .widthIn(max = 320.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(bg)
+                .combinedClickable(onClick = {}, onLongClick = onLong)
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        ) {
+            if (reply != null) {
+                Text(previewText(reply), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 2)
+            }
+            val atts = asMapList(m["attachments"])
+            if (atts.isNotEmpty()) {
+                AttachmentBlock(atts, vault, readyTick, onLong) { items, start -> onOpenMedia(items, start) }
+            }
+            val body = m.str("text")
+            if (body.isNotBlank()) {
+                Text(body, color = if (dark) Color(0xFFF5F5F5) else Color(0xFF111111))
+            } else if (atts.isEmpty()) {
+                val fallback = previewText(m)
+                if (fallback.isNotBlank()) Text(fallback, color = if (dark) Color(0xFFF5F5F5) else Color(0xFF111111))
+            }
+            Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                if (m["edited_at"] != null && m.str("edited_at").isNotBlank()) {
+                    Text("изменено  ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(shortTime(m["created_at"]?.toString()), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (mine && ticks != "none" && ticks.isNotBlank()) {
+                    Text(
+                        if (ticks == "sent") "  ✓" else "  ✓✓",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ticksColor,
+                    )
+                }
+            }
         }
     }
-    return map
+}
+
+private fun previewText(m: Map<*, *>): String {
+    val kind = m["type"]?.toString() ?: "text"
+    val text = m["text"]?.toString().orEmpty()
+    return when (kind) {
+        "photo" -> text.ifBlank { "Фото" }
+        "video" -> text.ifBlank { "Видео" }
+        "album" -> text.ifBlank { "Альбом" }
+        "file" -> {
+            val atts = m["attachments"] as? List<*>
+            val name = (atts?.firstOrNull() as? Map<*, *>)?.get("orig_name")?.toString()
+            text.ifBlank { name ?: "Файл" }
+        }
+        else -> text
+    }
+}
+
+private suspend fun loadMsgs(
+    client: TokenClient,
+    id: Long,
+    messages: MutableList<Map<String, Any>>,
+    hasMore: MutableState<Boolean>,
+    vault: MediaVault,
+    onReady: () -> Unit,
+) {
+    val data = client.call { auth -> messages(auth, id) }
+    val list = asMapList(data["messages"])
+    messages.clear()
+    messages.addAll(list)
+    hasMore.value = data["has_more"] == true
+    try {
+        client.call { auth -> read(auth, id, emptyMap<String, Any?>()) }
+    } catch (_: Exception) { }
+    try {
+        vault.ensureMessages(list, onReady)
+    } catch (_: Exception) { }
+}
+
+private suspend fun loadOlder(
+    client: TokenClient,
+    dialogId: Long,
+    before: Long,
+    messages: MutableList<Map<String, Any>>,
+    hasMore: MutableState<Boolean>,
+    vault: MediaVault,
+    onReady: () -> Unit,
+) {
+    val data = client.call { auth -> messages(auth, dialogId, before = before) }
+    val list = asMapList(data["messages"])
+    list.forEach { upsertMessage(messages, it) }
+    hasMore.value = data["has_more"] == true
+    try {
+        vault.ensureMessages(messages.toList(), onReady)
+    } catch (_: Exception) { }
+}
+
+private fun refreshDialogPreview(dialogs: MutableList<Map<String, Any>>, msg: Map<String, Any>) {
+    val dialogId = msg["dialog_id"].asLong() ?: return
+    val idx = dialogs.indexOfFirst { it["id"].asLong() == dialogId }
+    if (idx < 0) return
+    dialogs[idx] = dialogs[idx].toMutableMap().apply {
+        put("last_message", previewText(msg))
+        put("last_at", msg["created_at"] ?: "")
+    }
+}
+
+private fun updatePeerPresence(
+    dialogs: MutableList<Map<String, Any>>,
+    active: MutableState<Map<String, Any>?>,
+    userId: Long,
+    online: Boolean,
+    lastSeen: String,
+) {
+    fun patch(row: Map<String, Any>): Map<String, Any> {
+        val peer = row.map("peer")?.toMutableMap() ?: return row
+        if (peer["id"].asLong() != userId) return row
+        peer["online"] = online
+        if (lastSeen.isNotBlank()) peer["last_seen"] = lastSeen
+        return row.toMutableMap().apply { put("peer", peer) }
+    }
+    for (i in dialogs.indices) dialogs[i] = patch(dialogs[i])
+    active.value?.let { active.value = patch(it) }
+}
+
+private fun maybeGzip(bytes: ByteArray): Pair<ByteArray, Boolean> {
+    val out = ByteArrayOutputStream()
+    GZIPOutputStream(out).use { it.write(bytes) }
+    val gz = out.toByteArray()
+    return if (gz.size <= (bytes.size * 0.9).toInt()) gz to true else bytes to false
 }

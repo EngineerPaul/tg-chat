@@ -1,0 +1,11 @@
+<resources>
+    <style name="Theme.Calc" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">#FF0E1621</item>
+        <item name="android:statusBarColor">#FF0E1621</item>
+        <item name="android:navigationBarColor">#FF0E1621</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:colorBackground">#FF0E1621</item>
+        <item name="android:textColor">#FFF5F5F5</item>
+        <item name="android:editTextColor">#FFF5F5F5</item>
+    </style>
+</resources>

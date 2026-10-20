@@ -1,12 +1,14 @@
 package ru.daystream.calc.ui
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -15,10 +17,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ru.daystream.calc.data.SessionStore
-import ru.daystream.calc.data.TokenClient
 import ru.daystream.calc.net.createApi
 import ru.daystream.calc.sync.SyncService
 
@@ -32,21 +35,45 @@ class ActivationActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val store = SessionStore(this)
+        val theme = ThemeStore(this)
         setContent {
-            MaterialTheme {
+            AppTheme(theme.mode) {
                 val login = remember { mutableStateOf(store.login) }
                 val key = remember { mutableStateOf("") }
                 val err = remember { mutableStateOf("") }
                 val scope = rememberCoroutineScope()
                 val first = !store.hasSession()
+                val colors = readableFieldColors()
                 Column(Modifier.padding(24.dp)) {
                     Text("Активация функций", style = MaterialTheme.typography.titleLarge)
-                    Text("Введите ключ активации, чтобы открыть расширенные функции.", modifier = Modifier.padding(vertical = 8.dp))
+                    Text(
+                        "Введите ключ активации, чтобы открыть расширенные функции.",
+                        modifier = Modifier.padding(vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     if (first) {
-                        OutlinedTextField(login.value, { login.value = it }, label = { Text("Идентификатор") }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(
+                            login.value,
+                            { login.value = it },
+                            label = { Text("Идентификатор") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            colors = colors,
+                        )
                     }
-                    OutlinedTextField(key.value, { key.value = it }, label = { Text("Ключ") }, modifier = Modifier.fillMaxWidth())
-                    if (err.value.isNotEmpty()) Text(err.value, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                    OutlinedTextField(
+                        key.value,
+                        { key.value = it },
+                        label = { Text("Ключ") },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        colors = colors,
+                    )
+                    if (err.value.isNotEmpty()) {
+                        Text(err.value, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                    }
                     Button(
                         onClick = {
                             scope.launch {
@@ -58,9 +85,10 @@ class ActivationActivity : ComponentActivity() {
                                         store.access = res["access_token"] as String
                                         store.refresh = res["refresh_token"] as String
                                         store.saveKeyHash(key.value)
-                                        startService(Intent(this@ActivationActivity, SyncService::class.java))
+                                        startSync()
                                         openChat()
                                     } else if (store.checkKey(key.value)) {
+                                        startSync()
                                         openChat()
                                     } else {
                                         err.value = "Неверный ключ"
@@ -75,6 +103,14 @@ class ActivationActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Фон после привязки: без всплывающего окна «Обновления».
+     */
+    private fun startSync() {
+        val intent = Intent(this, SyncService::class.java)
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
     }
 
     /**

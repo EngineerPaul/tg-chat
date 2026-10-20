@@ -87,6 +87,10 @@ interface ChatApi {
     @DELETE("messages/{id}")
     suspend fun delete(@Header("Authorization") auth: String, @Path("id") id: Long): Map<String, Any>
 
+    /** Ник собеседника. */
+    @PATCH("dialogs/{id}/alias")
+    suspend fun alias(@Header("Authorization") auth: String, @Path("id") id: Long, @Body body: Map<String, String>): Map<String, Any>
+
     /** Медиа-альбом. */
     @Multipart
     @POST("dialogs/{id}/media")

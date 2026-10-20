@@ -1,9 +1,11 @@
 package ru.daystream.calc.sync
 
-import android.app.Notification
 import android.app.Service
+import android.content.pm.ServiceInfo
 import android.content.Intent
+import android.os.Build
 import android.os.IBinder
+import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -12,6 +14,7 @@ import kotlinx.coroutines.launch
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import ru.daystream.calc.ChatApp
 import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.TokenClient
 import ru.daystream.calc.net.openWs
@@ -25,15 +28,25 @@ class SyncService : Service() {
     private var socket: WebSocket? = null
 
     /**
-     * Поднять соединение, если есть сессия.
+     * Поднять соединение, если есть сессия. Уведомление тихое — не всплывающее окно.
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val n = Notification.Builder(this, "updates")
+        val n = NotificationCompat.Builder(this, ChatApp.CHANNEL_SYNC)
             .setContentTitle("Обновления")
             .setContentText("Проверка обновлений")
             .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setOngoing(true)
+            .setSilent(true)
+            .setShowWhen(false)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_DEFERRED)
             .build()
-        startForeground(1, n)
+        if (Build.VERSION.SDK_INT >= 29) {
+            startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(1, n)
+        }
         scope.launch { loop() }
         return START_STICKY
     }

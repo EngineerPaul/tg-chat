@@ -137,6 +137,7 @@ private fun Pad(dimmed: List<String>, onDimmed: () -> Unit, onKey: (String) -> U
                             contentPadding = PaddingValues(0.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (label == "=") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (label == "=") MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
                             ),
                         ) { Text(label, fontSize = 16.sp) }
                     }

@@ -1,10 +1,10 @@
 package ru.daystream.calc.ui
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import ru.daystream.calc.data.SessionStore
@@ -22,14 +22,16 @@ class ShellActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (SessionStore(this).hasSession()) {
-            startService(Intent(this, SyncService::class.java))
+            val sync = Intent(this, SyncService::class.java)
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(sync) else startService(sync)
         }
         if (UiState.withinFiveMinutes()) {
             startActivity(Intent(this, ChatActivity::class.java))
         }
         val store = getSharedPreferences("calc_hist", MODE_PRIVATE)
+        val theme = ThemeStore(this)
         setContent {
-            MaterialTheme {
+            AppTheme(theme.mode) {
                 val hist = remember { mutableStateOf(store.getString("tape", "")?.split("\n")?.filter { it.isNotBlank() } ?: emptyList()) }
                 CalculatorScreen(
                     history = hist.value,
