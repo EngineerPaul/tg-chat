@@ -3,6 +3,8 @@ package ru.daystream.calc.ui
 import android.app.NotificationManager
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -17,12 +19,25 @@ import ru.daystream.calc.sync.SyncService
  * Скрытая часть. FLAG_SECURE, чтобы в недавних не было переписки.
  */
 class ChatActivity : ComponentActivity() {
+    private val lockHandler = Handler(Looper.getMainLooper())
+    private val expireRunnable = Runnable {
+        if (!UiState.withinFiveMinutes() && UiState.minimizedAt != 0L) {
+            UiState.chatOpen = false
+            finish()
+        }
+    }
+
     /**
-     * Включить защиту снимка и UI чата.
+     * Включить защиту снимка и UI чата. После 5 минут в фоне — не рисовать чат.
      */
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         getSystemService(NotificationManager::class.java).cancel(1)
+        if (expiredLock()) {
+            finish()
+            overridePendingTransition(0, 0)
+            return
+        }
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         UiState.chatOpen = true
         UiState.closedByArrow = false
@@ -57,37 +72,63 @@ class ChatActivity : ComponentActivity() {
     }
 
     /**
-     * Свернули — таймер 5 минут, в недавних калькулятор (этот экран не снимается).
+     * Свернули — таймер 5 минут.
      */
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (UiState.chatOpen && !UiState.closedByArrow) {
-            UiState.minimizedAt = System.currentTimeMillis()
-        }
+        markMinimized()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        markMinimized()
     }
 
     /**
-     * Если 5 минут вышли, пока были в фоне — закрыть чат до кадра.
+     * Если 5 минут вышли — закрыть чат до кадра, останется калькулятор.
      */
     override fun onStart() {
         super.onStart()
-        if (UiState.minimizedAt != 0L && !UiState.withinFiveMinutes() && !UiState.chatOpen) {
+        lockHandler.removeCallbacks(expireRunnable)
+        if (expiredLock()) {
             finish()
+            overridePendingTransition(0, 0)
+            return
         }
-        if (UiState.minimizedAt != 0L && !UiState.withinFiveMinutes()) {
-            UiState.chatOpen = false
-            finish()
-        }
+        UiState.chatOpen = true
+        UiState.minimizedAt = 0L
+    }
+
+    override fun onDestroy() {
+        lockHandler.removeCallbacks(expireRunnable)
+        super.onDestroy()
     }
 
     /**
      * Короткое «назад»: предыдущее приложение, чат закрыть, процесс жив.
      */
     fun closeLikeArrow() {
+        lockHandler.removeCallbacks(expireRunnable)
         UiState.closedByArrow = true
         UiState.chatOpen = false
         UiState.minimizedAt = 0L
         moveTaskToBack(true)
         finish()
+    }
+
+    private fun markMinimized() {
+        if (isFinishing || isChangingConfigurations) return
+        if (UiState.chatOpen && !UiState.closedByArrow) {
+            UiState.minimizedAt = System.currentTimeMillis()
+            lockHandler.removeCallbacks(expireRunnable)
+            lockHandler.postDelayed(expireRunnable, 5 * 60 * 1000L)
+        }
+    }
+
+    private fun expiredLock(): Boolean {
+        if (UiState.minimizedAt == 0L) return false
+        if (UiState.withinFiveMinutes()) return false
+        UiState.chatOpen = false
+        return true
     }
 }

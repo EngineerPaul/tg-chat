@@ -63,7 +63,22 @@ function preview(msg: Msg): string {
   if (msg.type === "video") return "Видео";
   if (msg.type === "file") return msg.attachments[0]?.orig_name || "Файл";
   if (msg.type === "album") return "Альбом";
-  return msg.text || "";
+  return (msg.text || "").trim();
+}
+
+/**
+ * Одно эмодзи без другого текста — крупнее, как в Telegram.
+ */
+function isSoloEmoji(text: string): boolean {
+  const t = text.trim();
+  if (!t || /\s/.test(t)) return false;
+  try {
+    const segs = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(t)];
+    if (segs.length !== 1) return false;
+    return /\p{Extended_Pictographic}/u.test(segs[0].segment);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -296,6 +311,10 @@ export default function ChatApp() {
             setMessages((cur) => cur.filter((m) => m.id !== data.id));
           }
           cacheDelete(data.id);
+        }
+        if (data.event === "caught_up") {
+          const dialogId = Number(data.dialog_id);
+          setDialogs((list) => list.map((d) => (d.id === dialogId ? { ...d, unread: 0 } : d)));
         }
         if (data.event === "delivered" || data.event === "read") {
           const ids = (data.ids || (data.id != null ? [data.id] : [])).map(Number);
@@ -636,7 +655,11 @@ export default function ChatApp() {
                       <a href={`${m.attachments[0].url}?download=1`}>Сохранить</a>
                     </div>
                   ) : null}
-                  {m.text ? <div>{m.text}{m.edited_at ? " (изменено)" : ""}</div> : null}
+                  {m.text?.trim() ? (
+                    <div className={isSoloEmoji(m.text) ? "solo-emoji" : undefined}>
+                      {m.text.trim()}{m.edited_at ? " (изменено)" : ""}
+                    </div>
+                  ) : null}
                   <div className="time">
                     {shortTime(m.created_at)}
                     {m.author_id === me.id ? (

@@ -97,4 +97,5 @@ async def read_dialog(
     peer = peer_of(dialog, user.id)
     if ids:
         await hub.send_user(peer, {"event": "read", "dialog_id": dialog_id, "ids": ids})
+    await hub.send_user(user.id, {"event": "caught_up", "dialog_id": dialog_id})
     return {"ok": True, "ids": ids}

@@ -57,6 +57,7 @@ button, input, textarea { font: inherit; }
 .bubble.out { align-self: flex-end; background: var(--out); }
 .bubble.in { align-self: flex-start; background: var(--in); }
 .bubble .time { font-size: 11px; color: var(--muted); text-align: right; }
+.solo-emoji { font-size: 40px; line-height: 1.15; }
 .ticks { margin-left: 4px; letter-spacing: -1px; }
 .ticks.sent, .ticks.delivered { color: var(--muted); }
 .ticks.read { color: #4faeef; }

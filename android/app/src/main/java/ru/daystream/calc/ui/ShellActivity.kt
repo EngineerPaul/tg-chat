@@ -27,9 +27,7 @@ class ShellActivity : ComponentActivity() {
             val sync = Intent(this, SyncService::class.java)
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(sync) else startService(sync)
         }
-        if (UiState.withinFiveMinutes()) {
-            startActivity(Intent(this, ChatActivity::class.java))
-        }
+        openChatIfWindow()
         val store = getSharedPreferences("calc_hist", MODE_PRIVATE)
         val theme = ThemeStore(this)
         setContent {
@@ -48,12 +46,27 @@ class ShellActivity : ComponentActivity() {
     }
 
     /**
+     * Иконка при живом процессе: вернуть чат только в окне 5 минут.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openChatIfWindow()
+    }
+
+    /**
      * После 5 минут не восстанавливать чат.
      */
     override fun onResume() {
         super.onResume()
         if (UiState.minimizedAt != 0L && !UiState.withinFiveMinutes()) {
             UiState.minimizedAt = 0L
+        }
+    }
+
+    private fun openChatIfWindow() {
+        if (UiState.withinFiveMinutes()) {
+            startActivity(Intent(this, ChatActivity::class.java))
         }
     }
 }
