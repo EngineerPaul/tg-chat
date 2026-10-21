@@ -135,6 +135,41 @@ fun shortTime(iso: String?): String {
     return "%02d:%02d".format(cal.get(java.util.Calendar.HOUR_OF_DAY), cal.get(java.util.Calendar.MINUTE))
 }
 
+private val MonthsRu = arrayOf(
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
+
+/**
+ * Подпись смены дня в ленте, как в Telegram.
+ */
+fun dayChipLabel(iso: String?): String {
+    val then = parseIso(iso) ?: return ""
+    val cal = java.util.Calendar.getInstance().apply { timeInMillis = then }
+    val now = java.util.Calendar.getInstance()
+    if (sameDay(cal, now)) return "сегодня"
+    val yest = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }
+    if (sameDay(cal, yest)) return "вчера"
+    val day = cal.get(java.util.Calendar.DAY_OF_MONTH)
+    val month = MonthsRu[cal.get(java.util.Calendar.MONTH)]
+    return if (cal.get(java.util.Calendar.YEAR) == now.get(java.util.Calendar.YEAR)) {
+        "$day $month"
+    } else {
+        "$day $month ${cal.get(java.util.Calendar.YEAR)}"
+    }
+}
+
+/**
+ * Один календарный день у двух ISO-меток.
+ */
+fun sameMessageDay(a: String?, b: String?): Boolean {
+    val ta = parseIso(a) ?: return false
+    val tb = parseIso(b) ?: return false
+    val ca = java.util.Calendar.getInstance().apply { timeInMillis = ta }
+    val cb = java.util.Calendar.getInstance().apply { timeInMillis = tb }
+    return sameDay(ca, cb)
+}
+
 /**
  * Цвет круга-заглушки аватара.
  */

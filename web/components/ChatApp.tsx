@@ -6,7 +6,7 @@ import EmojiPicker from "@/components/EmojiPicker";
 import { api, jsonOrThrow, logout } from "@/lib/api";
 import { cacheDelete, cacheMessages, loadCached } from "@/lib/cache";
 import { compressPhoto, maybeGzip } from "@/lib/compress";
-import { avatarColor, lastSeenText, shortTime } from "@/lib/format";
+import { avatarColor, dayChipLabel, lastSeenText, sameMessageDay, shortTime } from "@/lib/format";
 import { chatInForeground, playIncoming, setTabAlert, unlockAudio } from "@/lib/notify";
 import { getAccess, getTheme, setTheme as persistTheme } from "@/lib/storage";
 
@@ -128,6 +128,8 @@ export default function ChatApp() {
   const activeIdRef = useRef<number | null>(null);
   const meIdRef = useRef<number | null>(null);
   const applyIncomingRef = useRef<(msg: Msg) => void>(() => undefined);
+  const pendingScroll = useRef<number | null>(null);
+  const [jumpFlash, setJumpFlash] = useState<number | null>(null);
   activeIdRef.current = active?.id ?? null;
   meIdRef.current = me?.id ?? null;
   dialogsRef.current = dialogs;
@@ -258,6 +260,34 @@ export default function ChatApp() {
   applyIncomingRef.current = applyIncoming;
 
   /**
+   * Перемотать к оригиналу ответа.
+   */
+  async function jumpToReply(id: number) {
+    const el = document.getElementById(`msg-${id}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setJumpFlash(id);
+      window.setTimeout(() => setJumpFlash((cur) => (cur === id ? null : cur)), 1600);
+      return;
+    }
+    if (!active) return;
+    pendingScroll.current = id;
+    let oldest = messages[0]?.id;
+    let acc = messages;
+    for (let i = 0; i < 20 && oldest; i += 1) {
+      const data = await jsonOrThrow<{ messages: Msg[] }>(
+        await api(`/dialogs/${active.id}/messages?limit=50&before=${oldest}`),
+      );
+      if (!data.messages.length) break;
+      acc = mergeMessages(data.messages, acc);
+      setMessages(acc);
+      await cacheMessages(active.id, data.messages);
+      if (acc.some((m) => m.id === id)) break;
+      oldest = data.messages[0]?.id;
+    }
+  }
+
+  /**
    * Подгрузить старше при прокрутке вверх.
    */
   async function loadOlder() {
@@ -270,6 +300,18 @@ export default function ChatApp() {
     setMessages(merged);
     await cacheMessages(active.id, data.messages);
   }
+
+  useEffect(() => {
+    const id = pendingScroll.current;
+    if (id == null) return;
+    const el = document.getElementById(`msg-${id}`);
+    if (!el) return;
+    pendingScroll.current = null;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setJumpFlash(id);
+    const t = window.setTimeout(() => setJumpFlash((cur) => (cur === id ? null : cur)), 1600);
+    return () => window.clearTimeout(t);
+  }, [messages]);
 
   useEffect(() => {
     if (!me) return;
@@ -630,15 +672,23 @@ export default function ChatApp() {
                 if (e.currentTarget.scrollTop < 40) loadOlder();
               }}
             >
-              {messages.map((m) => (
-                <div key={m.id} className={`bubble ${m.author_id === me.id ? "out" : "in"}`} onContextMenu={(e) => {
+              {messages.map((m, i) => (
+                <div key={m.id} style={{ display: "contents" }}>
+                  {!sameMessageDay(m.created_at, messages[i - 1]?.created_at) ? (
+                    <div className="daychip">{dayChipLabel(m.created_at)}</div>
+                  ) : null}
+                <div id={`msg-${m.id}`} className={`bubble ${m.author_id === me.id ? "out" : "in"}${jumpFlash === m.id ? " jump" : ""}`} onContextMenu={(e) => {
                   e.preventDefault();
                   const act = prompt("reply / edit / delete", "reply");
                   if (act === "reply") setReply(m);
                   if (act === "edit" && m.author_id === me.id) { setEditing(m); setText(m.text || ""); }
                   if (act === "delete") removeMsg(m.id);
                 }}>
-                  {m.reply_to ? <div className="prev">↳ {m.reply_to.text || m.reply_to.type}</div> : null}
+                  {m.reply_to ? (
+                    <div className="replyq" onClick={() => { void jumpToReply(m.reply_to!.id); }}>
+                      {m.reply_to.text || m.reply_to.type}
+                    </div>
+                  ) : null}
                   {m.attachments.length > 0 && m.type !== "file" ? (
                     <div className={`album n${Math.min(m.attachments.length, 4)}`}>
                       {m.attachments.map((a, i) => (
@@ -666,6 +716,7 @@ export default function ChatApp() {
                       <span className={`ticks ${m.ticks}`}>{m.ticks === "sent" ? "✓" : "✓✓"}</span>
                     ) : null}
                   </div>
+                </div>
                 </div>
               ))}
             </div>

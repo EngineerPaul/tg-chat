@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -65,6 +67,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -137,6 +140,7 @@ fun ChatRoot(
     val stickBottom = remember { mutableStateOf(true) }
     val sendError = remember { mutableStateOf("") }
     val bootDone = remember { mutableStateOf(false) }
+    val highlightId = remember { mutableStateOf<Long?>(null) }
 
     val photos = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         val dlg = active.value ?: return@rememberLauncherForActivityResult
@@ -218,7 +222,13 @@ fun ChatRoot(
             "ticks" to "sent",
             "created_at" to java.time.Instant.now().toString(),
         )
-        replyTo.value?.let { pending["reply_to"] = it }
+        replyTo.value?.let { src ->
+            pending["reply_to"] = mutableMapOf<String, Any>(
+                "id" to (src["id"].asLong() ?: 0L),
+                "text" to previewText(src),
+                "type" to src.str("type").ifBlank { "text" },
+            )
+        }
         messages.add(pending)
         text.value = ""
         replyTo.value = null
@@ -248,6 +258,38 @@ fun ChatRoot(
                     sendError.value = "Не отправлено"
                 }
             }
+        }
+    }
+
+    /**
+     * Прокрутить к оригиналу ответа, подгрузив старше при необходимости.
+     */
+    fun jumpToReply(id: Long) {
+        val dialogId = active.value?.get("id").asLong() ?: return
+        scope.launch {
+            var guard = 0
+            while (messages.none { it["id"].asLong() == id } && hasMore.value && guard < 20) {
+                guard += 1
+                val oldest = messages.minOfOrNull { it["id"].asLong() ?: Long.MAX_VALUE } ?: break
+                try {
+                    loadOlder(client, dialogId, oldest, messages, hasMore, vault) { readyTick.value = readyTick.value + 1 }
+                } catch (_: Exception) {
+                    break
+                }
+            }
+            val reversed = messages.sortedBy { it["id"].asLong() ?: 0L }.asReversed()
+            val index = reversed.indexOfFirst { it["id"].asLong() == id }
+            if (index < 0) return@launch
+            highlightId.value = id
+            try {
+                listState.animateScrollToItem(index)
+            } catch (_: Exception) {
+                try {
+                    listState.scrollToItem(index)
+                } catch (_: Exception) { }
+            }
+            delay(1600)
+            if (highlightId.value == id) highlightId.value = null
         }
     }
 
@@ -498,6 +540,7 @@ fun ChatRoot(
             }
         } else {
             val chronological = messages.sortedBy { it["id"].asLong() ?: 0L }
+            val newestFirst = chronological.asReversed()
             LazyColumn(
                 state = listState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -505,18 +548,37 @@ fun ChatRoot(
                 verticalArrangement = Arrangement.Top,
             ) {
                 itemsIndexed(
-                    items = chronological.asReversed(),
+                    items = newestFirst,
                     key = { _, m -> m["id"].asLong() ?: m.hashCode().toLong() },
-                ) { _, m ->
-                    MessageBubble(
-                        m = m,
-                        mine = m["author_id"].asLong() != null && m["author_id"].asLong() == meId.value,
-                        dark = dark,
-                        vault = vault,
-                        readyTick = readyTick.value,
-                        onLong = { menuFor.value = m },
-                        onOpenMedia = { items, start -> viewer.value = items to start },
-                    )
+                ) { index, m ->
+                    val older = newestFirst.getOrNull(index + 1)
+                    val showDay = older == null || !sameMessageDay(m["created_at"]?.toString(), older["created_at"]?.toString())
+                    Column(Modifier.fillMaxWidth()) {
+                        if (showDay) {
+                            Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    dayChipLabel(m["created_at"]?.toString()),
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0x66000000))
+                                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                                )
+                            }
+                        }
+                        MessageBubble(
+                            m = m,
+                            mine = m["author_id"].asLong() != null && m["author_id"].asLong() == meId.value,
+                            dark = dark,
+                            vault = vault,
+                            readyTick = readyTick.value,
+                            highlighted = highlightId.value == m["id"].asLong(),
+                            onLong = { menuFor.value = m },
+                            onReplyClick = { id -> jumpToReply(id) },
+                            onOpenMedia = { items, start -> viewer.value = items to start },
+                        )
+                    }
                 }
             }
             menuFor.value?.let { target ->
@@ -745,7 +807,9 @@ private fun MessageBubble(
     dark: Boolean,
     vault: MediaVault,
     readyTick: Int,
+    highlighted: Boolean,
     onLong: () -> Unit,
+    onReplyClick: (Long) -> Unit,
     onOpenMedia: (List<ViewerItem>, Int) -> Unit,
 ) {
     val ticks = m.str("ticks")
@@ -771,11 +835,30 @@ private fun MessageBubble(
                 .widthIn(max = bubbleMax)
                 .clip(RoundedCornerShape(14.dp))
                 .background(bg)
+                .then(if (highlighted) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)) else Modifier)
                 .combinedClickable(onClick = {}, onLongClick = onLong)
                 .padding(horizontal = 10.dp, vertical = 6.dp),
         ) {
             if (reply != null) {
-                Text(previewText(reply), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 2)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (dark) Color(0x33000000) else Color(0x1A000000))
+                        .clickable { reply["id"].asLong()?.let(onReplyClick) }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.width(2.dp).height(28.dp).background(MaterialTheme.colorScheme.primary))
+                    Text(
+                        previewText(reply),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
             }
             if (atts.isNotEmpty()) {
                 AttachmentBlock(atts, vault, readyTick, onLong) { items, start -> onOpenMedia(items, start) }

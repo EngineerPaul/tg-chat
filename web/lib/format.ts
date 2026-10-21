@@ -34,6 +34,31 @@ export function shortTime(iso: string | undefined): string {
 }
 
 /**
+ * Подпись смены дня в ленте, как в Telegram.
+ */
+export function dayChipLabel(iso: string | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return "сегодня";
+  const yest = new Date(now);
+  yest.setDate(now.getDate() - 1);
+  if (d.toDateString() === yest.toDateString()) return "вчера";
+  const day = d.getDate();
+  const month = d.toLocaleDateString("ru-RU", { month: "long" });
+  if (d.getFullYear() === now.getFullYear()) return `${day} ${month}`;
+  return `${day} ${month} ${d.getFullYear()}`;
+}
+
+/**
+ * Один календарный день у двух ISO-меток.
+ */
+export function sameMessageDay(a?: string, b?: string): boolean {
+  if (!a || !b) return false;
+  return new Date(a).toDateString() === new Date(b).toDateString();
+}
+
+/**
  * Цвет круга-заглушки аватара по логину.
  * @param login логин
  */

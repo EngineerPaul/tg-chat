@@ -20,12 +20,7 @@ import ru.daystream.calc.sync.SyncService
  */
 class ChatActivity : ComponentActivity() {
     private val lockHandler = Handler(Looper.getMainLooper())
-    private val expireRunnable = Runnable {
-        if (!UiState.withinFiveMinutes() && UiState.minimizedAt != 0L) {
-            UiState.chatOpen = false
-            finish()
-        }
-    }
+    private val expireRunnable = Runnable { expireToPublic() }
 
     /**
      * Включить защиту снимка и UI чата. После 5 минут в фоне — не рисовать чат.
@@ -34,6 +29,7 @@ class ChatActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         getSystemService(NotificationManager::class.java).cancel(1)
         if (expiredLock()) {
+            hideChatSurface()
             finish()
             overridePendingTransition(0, 0)
             return
@@ -72,14 +68,16 @@ class ChatActivity : ComponentActivity() {
     }
 
     /**
-     * Свернули — таймер 5 минут.
+     * Свернули — убрать кадр чата сразу, чтобы при возврате его не было видно.
      */
     override fun onUserLeaveHint() {
+        hideChatSurface()
         super.onUserLeaveHint()
         markMinimized()
     }
 
     override fun onStop() {
+        hideChatSurface()
         super.onStop()
         markMinimized()
     }
@@ -87,14 +85,22 @@ class ChatActivity : ComponentActivity() {
     /**
      * Если 5 минут вышли — закрыть чат до кадра, останется калькулятор.
      */
+    override fun onRestart() {
+        if (expiredLock()) hideChatSurface()
+        super.onRestart()
+    }
+
     override fun onStart() {
-        super.onStart()
-        lockHandler.removeCallbacks(expireRunnable)
         if (expiredLock()) {
+            hideChatSurface()
+            super.onStart()
             finish()
             overridePendingTransition(0, 0)
             return
         }
+        super.onStart()
+        lockHandler.removeCallbacks(expireRunnable)
+        showChatSurface()
         UiState.chatOpen = true
         UiState.minimizedAt = 0L
     }
@@ -112,8 +118,10 @@ class ChatActivity : ComponentActivity() {
         UiState.closedByArrow = true
         UiState.chatOpen = false
         UiState.minimizedAt = 0L
+        hideChatSurface()
         moveTaskToBack(true)
         finish()
+        overridePendingTransition(0, 0)
     }
 
     private fun markMinimized() {
@@ -125,10 +133,32 @@ class ChatActivity : ComponentActivity() {
         }
     }
 
+    private fun expireToPublic() {
+        if (UiState.withinFiveMinutes() || UiState.minimizedAt == 0L) return
+        UiState.chatOpen = false
+        hideChatSurface()
+        finish()
+        overridePendingTransition(0, 0)
+    }
+
     private fun expiredLock(): Boolean {
         if (UiState.minimizedAt == 0L) return false
         if (UiState.withinFiveMinutes()) return false
         UiState.chatOpen = false
         return true
+    }
+
+    private fun hideChatSurface() {
+        window.decorView.alpha = 0f
+        val lp = window.attributes
+        lp.alpha = 0f
+        window.attributes = lp
+    }
+
+    private fun showChatSurface() {
+        val lp = window.attributes
+        lp.alpha = 1f
+        window.attributes = lp
+        window.decorView.alpha = 1f
     }
 }

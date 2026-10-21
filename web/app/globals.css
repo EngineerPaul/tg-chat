@@ -53,9 +53,12 @@ button, input, textarea { font: inherit; }
 .dlg .prev { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .badge { background: var(--accent); color: #fff; border-radius: 10px; min-width: 18px; padding: 0 6px; font-size: 12px; text-align: center; }
 .messages { flex: 1; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.daychip { align-self: center; background: rgba(0,0,0,.22); color: #fff; font-size: 12px; padding: 3px 10px; border-radius: 12px; margin: 8px 0 2px; }
+.replyq { border-left: 3px solid var(--accent); padding: 3px 8px; margin-bottom: 4px; font-size: 13px; color: var(--accent); cursor: pointer; border-radius: 0 6px 6px 0; background: rgba(0,0,0,.05); }
 .bubble { max-width: 72%; padding: 8px 10px; border-radius: 12px; position: relative; }
 .bubble.out { align-self: flex-end; background: var(--out); }
 .bubble.in { align-self: flex-start; background: var(--in); }
+.bubble.jump { box-shadow: 0 0 0 2px var(--accent); }
 .bubble .time { font-size: 11px; color: var(--muted); text-align: right; }
 .solo-emoji { font-size: 40px; line-height: 1.15; }
 .ticks { margin-left: 4px; letter-spacing: -1px; }
