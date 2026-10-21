@@ -35,6 +35,8 @@ import androidx.compose.ui.unit.sp
 
 private const val HISTORY_LIMIT = 20
 private val ErrorTokens = listOf("Infinity", "-Infinity", "NaN", "Ошибка")
+private val BinaryOps = setOf("+", "-", "×", "÷", "*", "/", "^")
+private val BinaryOpChars = setOf('+', '-', '×', '÷', '*', '/', '^')
 
 /**
  * Публичный экран калькулятора. Не знает про чат.
@@ -54,43 +56,80 @@ fun CalculatorScreen(
     val tape = remember { mutableStateListOf<String>().apply { addAll(history.take(HISTORY_LIMIT)) } }
 
     /**
-     * Добавить токен в выражение с правилами нулей.
+     * Цифра: 12 знаков до запятой, 6 после; без лишнего нуля в начале числа.
+     */
+    fun appendDigit(token: String) {
+        val s = expression.value
+        val n = currentNumber(s)
+        if (n.contains('.')) {
+            if (fractionDigits(n) >= MaxFractionDigits) return
+        } else if (n == "0") {
+            if (token == "0") return
+            expression.value = s.dropLast(1) + token
+            return
+        } else if (integerDigits(n) >= MaxIntegerDigits) {
+            return
+        }
+        if (token == "0") {
+            if (canAppendZero(s)) expression.value += "0"
+            return
+        }
+        expression.value = s + token
+    }
+
+    /**
+     * Добавить токен в выражение: нули, 6 знаков после запятой, смена знака.
      */
     fun append(token: String) {
-        if (isErrorToken(expression.value)) expression.value = ""
+        var s = expression.value.removeSuffix("...")
+        if (isErrorToken(s)) s = ""
+        expression.value = s
         when {
-            token == "000" -> repeat(3) { if (canAppendZero(expression.value)) expression.value += "0" }
-            token == "0" -> if (canAppendZero(expression.value)) expression.value += "0"
+            token in BinaryOps -> {
+                if (s.isEmpty()) {
+                    if (token == "-") expression.value = "-"
+                    return
+                }
+                expression.value = if (s.last() in BinaryOpChars) s.dropLast(1) + token else s + token
+            }
+            token == "000" -> repeat(3) { appendDigit("0") }
+            token == "0" -> appendDigit("0")
             token == "." -> {
                 val n = currentNumber(expression.value)
                 if (n.contains('.')) return
                 expression.value += if (n.isEmpty()) "0." else "."
             }
-            token.length == 1 && token[0] in '1'..'9' -> {
-                val n = currentNumber(expression.value)
-                expression.value = if (n == "0") expression.value.dropLast(1) + token else expression.value + token
-            }
+            token.length == 1 && token[0] in '1'..'9' -> appendDigit(token)
             else -> expression.value += token
         }
     }
 
     /**
-     * Стереть символ; Infinity / Ошибка — целиком.
+     * Стереть символ; многоточие / Infinity / Ошибка — целиком.
      */
     fun backspace() {
         val s = expression.value
         if (s.isEmpty()) return
+        if (s.endsWith("...")) {
+            expression.value = s.dropLast(3)
+            return
+        }
         val hit = ErrorTokens.filter { s.endsWith(it) }.maxByOrNull { it.length }
         expression.value = if (hit != null) s.dropLast(hit.length) else s.dropLast(1)
     }
 
     /**
-     * Посчитать и дописать в историю (не больше 20).
+     * Посчитать полное выражение и дописать в историю (не больше 20).
+     * Неполное («1», «1-») равно не трогает.
      */
     fun equals() {
-        val src = expression.value
-        if (src.isBlank()) return
-        val result = engine.evaluate(src)
+        val src = expression.value.removeSuffix("...").trim()
+        if (src.isBlank() || isErrorToken(src) || isBareNumber(src)) return
+        val result = engine.evaluate(src) ?: return
+        if (result == "Ошибка") {
+            expression.value = "Ошибка"
+            return
+        }
         tape.add(0, "$src = $result")
         while (tape.size > HISTORY_LIMIT) tape.removeAt(tape.lastIndex)
         onHistoryChange(tape.toList())
@@ -235,10 +274,63 @@ private fun CalcKey(
  * Текущее число в конце выражения (после оператора или скобки).
  */
 private fun currentNumber(expr: String): String {
+    val s = expr.removeSuffix("...")
     val ops = setOf('+', '-', '×', '÷', '*', '/', '^', '(', ')', '√')
-    var i = expr.length - 1
-    while (i >= 0 && expr[i] !in ops) i--
-    return expr.substring(i + 1)
+    var i = s.length - 1
+    while (i >= 0 && s[i] !in ops) i--
+    return s.substring(i + 1)
+}
+
+/**
+ * Сколько цифр до запятой у текущего числа.
+ */
+private fun integerDigits(number: String): Int = number.substringBefore('.').length
+
+/**
+ * Сколько цифр уже стоит после запятой у текущего числа.
+ */
+private fun fractionDigits(number: String): Int {
+    val dot = number.indexOf('.')
+    if (dot < 0) return 0
+    return number.length - dot - 1
+}
+
+/**
+ * Только число (знаки ± и внешние скобки не считаются выражением).
+ */
+private fun isBareNumber(expr: String): Boolean {
+    var s = expr.removeSuffix("...").trim()
+    while (s.length >= 2 && s.first() == '(' && s.last() == ')' && wrapped(s)) {
+        s = s.substring(1, s.lastIndex).trim()
+    }
+    if (s.startsWith('+') || s.startsWith('-')) s = s.drop(1)
+    if (s.isEmpty()) return true
+    var seenDot = false
+    var seenDigit = false
+    for (c in s) {
+        when {
+            c.isDigit() -> seenDigit = true
+            c == '.' && !seenDot -> seenDot = true
+            else -> return false
+        }
+    }
+    return seenDigit
+}
+
+/**
+ * Внешняя пара скобок охватывает всю строку.
+ */
+private fun wrapped(s: String): Boolean {
+    var depth = 0
+    for (i in s.indices) {
+        when (s[i]) {
+            '(' -> depth++
+            ')' -> depth--
+        }
+        if (depth < 0) return false
+        if (depth == 0 && i != s.lastIndex) return false
+    }
+    return depth == 0
 }
 
 /**
