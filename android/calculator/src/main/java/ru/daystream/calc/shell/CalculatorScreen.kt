@@ -13,8 +13,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -192,9 +195,9 @@ private fun Pad(
                 }
             }
             Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                CalcKey("Очистить\nисторию", Modifier.weight(1f).fillMaxHeight(), small = true) { onKey("hist") }
-                CalcKey("Очистить\nпример", Modifier.weight(1f).fillMaxHeight(), small = true) { onKey("C") }
-                CalcKey("Стереть\nэлемент", Modifier.weight(1f).fillMaxHeight(), small = true) { onKey("⌫") }
+                CalcKey("hist", Modifier.weight(1f).fillMaxHeight(), icon = true) { onKey("hist") }
+                CalcKey("C", Modifier.weight(1f).fillMaxHeight()) { onKey("C") }
+                CalcKey("⌫", Modifier.weight(1f).fillMaxHeight()) { onKey("⌫") }
                 CalcKey("=", Modifier.weight(2f).fillMaxHeight(), primary = true) { onKey("=") }
             }
         }
@@ -207,7 +210,7 @@ private fun CalcKey(
     modifier: Modifier,
     dimmed: Boolean = false,
     primary: Boolean = false,
-    small: Boolean = false,
+    icon: Boolean = false,
     onClick: () -> Unit,
 ) {
     Button(
@@ -220,7 +223,11 @@ private fun CalcKey(
             contentColor = if (primary) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
         ),
     ) {
-        Text(label, fontSize = if (small) 11.sp else 16.sp, textAlign = TextAlign.Center, lineHeight = 13.sp)
+        if (icon && label == "hist") {
+            Icon(Icons.Outlined.History, contentDescription = "История")
+        } else {
+            Text(label, fontSize = 16.sp, textAlign = TextAlign.Center)
+        }
     }
 }
 
