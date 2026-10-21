@@ -72,13 +72,13 @@ interface ChatApi {
         @Query("limit") limit: Int = 50,
     ): Map<String, Any>
 
-    /** Текст. */
+    /** Текст. Тело ответа — сырой JSON: в Map Gson падает на null. */
     @POST("dialogs/{id}/messages")
     suspend fun sendText(
         @Header("Authorization") auth: String,
         @Path("id") id: Long,
         @Body body: TextSend,
-    ): Map<String, Any>
+    ): okhttp3.ResponseBody
 
     /** Прочитать. */
     @POST("dialogs/{id}/read")

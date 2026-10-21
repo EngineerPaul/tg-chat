@@ -225,19 +225,28 @@ fun ChatRoot(
         sendError.value = ""
         stickBottom.value = true
         scope.launch {
-            scrollToLatest(listState)
             try {
-                val sent = withContext(Dispatchers.IO) {
-                    client.call { auth -> sendText(auth, dialogId, TextSend(bodyText, replyId)) }
+                scrollToLatest(listState)
+            } catch (_: Exception) { }
+            try {
+                val raw = withContext(Dispatchers.IO) {
+                    client.call { auth -> sendText(auth, dialogId, TextSend(bodyText, replyId)) }.string()
                 }
+                val sent = jsonToMap(org.json.JSONObject(raw))
                 messages.removeAll { it["id"].asLong() == localId }
                 upsertMessage(messages, sent)
                 stickBottom.value = true
-                scrollToLatest(listState)
-            } catch (_: Exception) {
-                messages.removeAll { it["id"].asLong() == localId }
-                text.value = bodyText
-                sendError.value = "Не отправлено"
+                try {
+                    scrollToLatest(listState)
+                } catch (_: Exception) { }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (e is retrofit2.HttpException || e is java.io.IOException) {
+                    messages.removeAll { it["id"].asLong() == localId }
+                    text.value = bodyText
+                    sendError.value = "Не отправлено"
+                }
             }
         }
     }
