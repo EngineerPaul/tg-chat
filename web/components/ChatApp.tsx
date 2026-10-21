@@ -7,7 +7,7 @@ import { api, jsonOrThrow, logout } from "@/lib/api";
 import { cacheDelete, cacheMessages, loadCached } from "@/lib/cache";
 import { compressPhoto, maybeGzip } from "@/lib/compress";
 import { avatarColor, dayChipLabel, lastSeenText, sameMessageDay, shortTime } from "@/lib/format";
-import { chatInForeground, playIncoming, setTabAlert, unlockAudio } from "@/lib/notify";
+import { chatInForeground, playIncoming, setTabAlert } from "@/lib/notify";
 import { getAccess, getTheme, setTheme as persistTheme } from "@/lib/storage";
 
 type User = {
@@ -158,17 +158,7 @@ export default function ChatApp() {
     const t = getTheme();
     setTheme(t);
     document.documentElement.setAttribute("data-theme", t);
-    unlockAudio();
-    const unlock = () => unlockAudio();
-    window.addEventListener("pointerdown", unlock);
-    window.addEventListener("keydown", unlock);
-    window.addEventListener("touchstart", unlock);
     boot();
-    return () => {
-      window.removeEventListener("pointerdown", unlock);
-      window.removeEventListener("keydown", unlock);
-      window.removeEventListener("touchstart", unlock);
-    };
   }, [boot]);
 
   useEffect(() => {
