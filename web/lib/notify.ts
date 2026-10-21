@@ -151,9 +151,9 @@ function pingDesktop(): void {
     const n = new Notification(TITLE, {
       body: "Новое сообщение",
       tag: "chat-incoming",
-      renotify: true,
       silent: false,
-    });
+      renotify: true,
+    } as NotificationOptions);
     n.onclick = () => {
       window.focus();
       n.close();
