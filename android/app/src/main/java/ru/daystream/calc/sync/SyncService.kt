@@ -1,8 +1,9 @@
 package ru.daystream.calc.sync
 
+import android.app.NotificationManager
 import android.app.Service
-import android.content.pm.ServiceInfo
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -20,7 +21,7 @@ import ru.daystream.calc.data.TokenClient
 import ru.daystream.calc.net.openWs
 
 /**
- * Фон: WebSocket и обновление access, без показа UI.
+ * Фон: WebSocket и обновление access, без постоянного уведомления.
  */
 class SyncService : Service() {
     private val job = Job()
@@ -28,25 +29,25 @@ class SyncService : Service() {
     private var socket: WebSocket? = null
 
     /**
-     * Поднять соединение, если есть сессия. Уведомление тихое — не всплывающее окно.
+     * После startForegroundService система требует уведомление на секунду — сразу снимаем.
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val n = NotificationCompat.Builder(this, ChatApp.CHANNEL_SYNC)
-            .setContentTitle("Обновления")
-            .setContentText("Проверка обновлений")
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setOngoing(true)
-            .setSilent(true)
-            .setShowWhen(false)
-            .setPriority(NotificationCompat.PRIORITY_MIN)
-            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_DEFERRED)
-            .build()
-        if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            startForeground(1, n)
+        if (Build.VERSION.SDK_INT >= 26) {
+            val n = NotificationCompat.Builder(this, ChatApp.CHANNEL_SYNC)
+                .setContentTitle("Обновления")
+                .setContentText("Проверка обновлений")
+                .setSmallIcon(android.R.drawable.stat_notify_sync)
+                .setSilent(true)
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .build()
+            if (Build.VERSION.SDK_INT >= 29) {
+                startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(1, n)
+            }
+            stopForeground(STOP_FOREGROUND_REMOVE)
         }
+        getSystemService(NotificationManager::class.java).cancel(1)
         scope.launch { loop() }
         return START_STICKY
     }
@@ -77,6 +78,7 @@ class SyncService : Service() {
     override fun onDestroy() {
         job.cancel()
         socket?.cancel()
+        getSystemService(NotificationManager::class.java).cancel(1)
         super.onDestroy()
     }
 

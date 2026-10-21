@@ -18,9 +18,14 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -57,12 +62,14 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -73,6 +80,7 @@ import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.TokenClient
 import ru.daystream.calc.media.MediaVault
 import ru.daystream.calc.media.PhotoCompressor
+import ru.daystream.calc.net.TextSend
 import ru.daystream.calc.net.openWs
 import java.io.ByteArrayOutputStream
 import java.util.zip.GZIPOutputStream
@@ -127,6 +135,8 @@ fun ChatRoot(
     val vault = remember { MediaVault(context) }
     val readyTick = remember { mutableStateOf(0) }
     val viewer = remember { mutableStateOf<Pair<List<ViewerItem>, Int>?>(null) }
+    val stickBottom = remember { mutableStateOf(true) }
+    val sendError = remember { mutableStateOf("") }
 
     val photos = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         val dlg = active.value ?: return@rememberLauncherForActivityResult
@@ -189,6 +199,49 @@ fun ChatRoot(
         }
     }
 
+    /**
+     * Отправить текст: сразу показать пузырь, потом подтвердить сервером.
+     */
+    fun sendCurrent() {
+        val dlg = active.value ?: return
+        val bodyText = text.value.trim()
+        if (bodyText.isBlank()) return
+        val dialogId = dlg["id"].asLong() ?: return
+        val replyId = replyTo.value?.get("id").asLong()
+        val localId = -System.currentTimeMillis()
+        val pending = mutableMapOf<String, Any>(
+            "id" to localId,
+            "dialog_id" to dialogId,
+            "author_id" to (meId.value ?: 0L),
+            "type" to "text",
+            "text" to bodyText,
+            "ticks" to "sent",
+            "created_at" to java.time.Instant.now().toString(),
+        )
+        replyTo.value?.let { pending["reply_to"] = it }
+        messages.add(pending)
+        text.value = ""
+        replyTo.value = null
+        sendError.value = ""
+        stickBottom.value = true
+        scope.launch {
+            scrollToLatest(listState)
+            try {
+                val sent = withContext(Dispatchers.IO) {
+                    client.call { auth -> sendText(auth, dialogId, TextSend(bodyText, replyId)) }
+                }
+                messages.removeAll { it["id"].asLong() == localId }
+                upsertMessage(messages, sent)
+                stickBottom.value = true
+                scrollToLatest(listState)
+            } catch (_: Exception) {
+                messages.removeAll { it["id"].asLong() == localId }
+                text.value = bodyText
+                sendError.value = "Не отправлено"
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         try {
             val profileMe = client.call { auth -> me(auth) }
@@ -209,6 +262,19 @@ fun ChatRoot(
         try {
             vault.ensureMessages(messages.toList()) { readyTick.value = readyTick.value + 1 }
         } catch (_: Exception) { }
+    }
+
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .distinctUntilChanged()
+            .collect { index ->
+                stickBottom.value = index <= 1
+            }
+    }
+
+    LaunchedEffect(messages.size, messages.maxOfOrNull { it["id"].asLong() ?: 0L }, listMode.value) {
+        if (listMode.value || messages.isEmpty() || !stickBottom.value) return@LaunchedEffect
+        scrollToLatest(listState)
     }
 
     LaunchedEffect(listState, listMode.value) {
@@ -490,6 +556,7 @@ fun ChatRoot(
                     text.value,
                     {
                         text.value = it
+                        if (it.isNotBlank()) sendError.value = ""
                         val id = active.value?.get("id").asLong()
                         if (id != null && it.isNotBlank()) {
                             socketRef.value?.send(JSONObject().put("event", "typing").put("dialog_id", id).toString())
@@ -499,24 +566,13 @@ fun ChatRoot(
                     placeholder = { Text("Сообщение") },
                     colors = readableFieldColors(),
                     maxLines = 4,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { sendCurrent() }),
                 )
-                IconButton(onClick = {
-                    val dlg = active.value ?: return@IconButton
-                    val bodyText = text.value.trim()
-                    if (bodyText.isBlank()) return@IconButton
-                    val dialogId = dlg["id"].asLong() ?: return@IconButton
-                    val replyId = replyTo.value?.get("id").asLong()
-                    scope.launch {
-                        try {
-                            val body = mutableMapOf<String, Any?>("text" to bodyText)
-                            if (replyId != null) body["reply_to_id"] = replyId
-                            val sent = client.call { auth -> sendText(auth, dialogId, body) }
-                            text.value = ""
-                            replyTo.value = null
-                            upsertMessage(messages, sent)
-                        } catch (_: Exception) { }
-                    }
-                }) { Icon(Icons.Default.Send, contentDescription = "Отправить") }
+                IconButton(onClick = { sendCurrent() }) { Icon(Icons.Default.Send, contentDescription = "Отправить") }
+            }
+            if (sendError.value.isNotBlank()) {
+                Text(sendError.value, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 16.dp, bottom = 6.dp))
             }
         }
     }
@@ -794,6 +850,17 @@ private fun updatePeerPresence(
     }
     for (i in dialogs.indices) dialogs[i] = patch(dialogs[i])
     active.value?.let { active.value = patch(it) }
+}
+
+private suspend fun scrollToLatest(state: LazyListState) {
+    val avg = state.layoutInfo.visibleItemsInfo.maxOfOrNull { it.size } ?: 80
+    val px = (state.firstVisibleItemIndex * avg + state.firstVisibleItemScrollOffset).toFloat()
+    if (px > 0f) {
+        try {
+            state.animateScrollBy(-px, tween(200))
+        } catch (_: Exception) { }
+    }
+    state.scrollToItem(0)
 }
 
 private fun maybeGzip(bytes: ByteArray): Pair<ByteArray, Boolean> {

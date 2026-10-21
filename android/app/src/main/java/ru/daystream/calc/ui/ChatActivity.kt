@@ -1,5 +1,6 @@
 package ru.daystream.calc.ui
 
+import android.app.NotificationManager
 import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
@@ -21,6 +22,7 @@ class ChatActivity : ComponentActivity() {
      */
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        getSystemService(NotificationManager::class.java).cancel(1)
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         UiState.chatOpen = true
         UiState.closedByArrow = false

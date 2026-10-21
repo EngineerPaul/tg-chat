@@ -27,6 +27,11 @@ import java.util.concurrent.TimeUnit
 const val BASE = "https://daystream.ru/extra/chat/api/"
 
 /**
+ * Тело текстового сообщения.
+ */
+data class TextSend(val text: String, val reply_to_id: Long? = null)
+
+/**
  * REST-методы чата.
  */
 interface ChatApi {
@@ -72,7 +77,7 @@ interface ChatApi {
     suspend fun sendText(
         @Header("Authorization") auth: String,
         @Path("id") id: Long,
-        @Body body: Map<String, Any?>,
+        @Body body: TextSend,
     ): Map<String, Any>
 
     /** Прочитать. */
