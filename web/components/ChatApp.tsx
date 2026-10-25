@@ -67,18 +67,43 @@ function preview(msg: Msg): string {
 }
 
 /**
- * Одно эмодзи без другого текста — крупнее, как в Telegram.
+ * Только смайлики: одно — очень крупно, несколько — как прежний одиночный.
  */
-function isSoloEmoji(text: string): boolean {
+function emojiRunClass(text: string): string | undefined {
   const t = text.trim();
-  if (!t || /\s/.test(t)) return false;
+  if (!t) return undefined;
   try {
-    const segs = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(t)];
-    if (segs.length !== 1) return false;
-    return /\p{Extended_Pictographic}/u.test(segs[0].segment);
+    const segs = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(t)]
+      .map((s) => s.segment)
+      .filter((s) => !/\s/.test(s));
+    if (!segs.length || segs.some((s) => !/\p{Extended_Pictographic}/u.test(s))) return undefined;
+    return segs.length === 1 ? "solo-emoji" : "pack-emoji";
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+/**
+ * Плавная прокрутка контейнера за duration мс.
+ */
+function animateScrollTo(el: HTMLElement, top: number, ms: number) {
+  const from = el.scrollTop;
+  const t0 = performance.now();
+  function step(now: number) {
+    const p = Math.min(1, (now - t0) / ms);
+    const ease = 1 - (1 - p) * (1 - p);
+    el.scrollTop = from + (top - from) * ease;
+    if (p < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+/**
+ * Смещение, чтобы сообщение оказалось по центру ленты.
+ */
+function replyScrollTop(box: HTMLElement, el: HTMLElement): number {
+  const top = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+  return top - (box.clientHeight - el.offsetHeight) / 2;
 }
 
 /**
@@ -130,6 +155,7 @@ export default function ChatApp() {
   const applyIncomingRef = useRef<(msg: Msg) => void>(() => undefined);
   const pendingScroll = useRef<number | null>(null);
   const [jumpFlash, setJumpFlash] = useState<number | null>(null);
+  const [awayFromNow, setAwayFromNow] = useState(false);
   activeIdRef.current = active?.id ?? null;
   meIdRef.current = me?.id ?? null;
   dialogsRef.current = dialogs;
@@ -254,10 +280,11 @@ export default function ChatApp() {
    */
   async function jumpToReply(id: number) {
     const el = document.getElementById(`msg-${id}`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    const box = boxRef.current;
+    if (el && box) {
+      animateScrollTo(box, replyScrollTop(box, el), 1000);
       setJumpFlash(id);
-      window.setTimeout(() => setJumpFlash((cur) => (cur === id ? null : cur)), 1600);
+      window.setTimeout(() => setJumpFlash((cur) => (cur === id ? null : cur)), 5000);
       return;
     }
     if (!active) return;
@@ -297,9 +324,14 @@ export default function ChatApp() {
     const el = document.getElementById(`msg-${id}`);
     if (!el) return;
     pendingScroll.current = null;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    const box = boxRef.current;
+    if (box) {
+      animateScrollTo(box, replyScrollTop(box, el), 1000);
+    } else {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
     setJumpFlash(id);
-    const t = window.setTimeout(() => setJumpFlash((cur) => (cur === id ? null : cur)), 1600);
+    const t = window.setTimeout(() => setJumpFlash((cur) => (cur === id ? null : cur)), 5000);
     return () => window.clearTimeout(t);
   }, [messages]);
 
@@ -655,11 +687,15 @@ export default function ChatApp() {
                 }}>⋮</button>
               </div>
             </div>
+            <div className="msgwrap">
             <div
               className="messages"
               ref={boxRef}
               onScroll={(e) => {
-                if (e.currentTarget.scrollTop < 40) loadOlder();
+                const node = e.currentTarget;
+                if (node.scrollTop < 40) loadOlder();
+                const gap = node.scrollHeight - node.scrollTop - node.clientHeight;
+                setAwayFromNow(gap > 240);
               }}
             >
               {messages.map((m, i) => (
@@ -696,7 +732,7 @@ export default function ChatApp() {
                     </div>
                   ) : null}
                   {m.text?.trim() ? (
-                    <div className={isSoloEmoji(m.text) ? "solo-emoji" : undefined}>
+                    <div className={emojiRunClass(m.text)}>
                       {m.text.trim()}{m.edited_at ? " (изменено)" : ""}
                     </div>
                   ) : null}
@@ -709,6 +745,20 @@ export default function ChatApp() {
                 </div>
                 </div>
               ))}
+            </div>
+            {awayFromNow ? (
+              <button
+                className="jumpnow"
+                type="button"
+                aria-label="К текущим"
+                onClick={() => {
+                  const box = boxRef.current;
+                  if (box) animateScrollTo(box, box.scrollHeight, 3000);
+                }}
+              >
+                ↓
+              </button>
+            ) : null}
             </div>
             {reply ? <div className="composer">Ответ: {reply.text || reply.type} <button type="button" onClick={() => setReply(null)}>×</button></div> : null}
             {emojiOn ? <EmojiPicker onPick={insertEmoji} /> : null}

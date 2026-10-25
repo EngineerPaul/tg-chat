@@ -22,6 +22,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ru.daystream.calc.data.SessionStore
+import ru.daystream.calc.data.UiState
 import ru.daystream.calc.net.createApi
 import ru.daystream.calc.sync.SyncService
 
@@ -117,6 +118,9 @@ class ActivationActivity : ComponentActivity() {
      * После верного ключа открыть скрытый чат.
      */
     private fun openChat() {
+        UiState.closedByArrow = false
+        UiState.minimizedAt = 0L
+        UiState.chatOpen = true
         startActivity(Intent(this, ChatActivity::class.java))
         finish()
     }

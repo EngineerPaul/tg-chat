@@ -18,6 +18,7 @@ import okhttp3.WebSocketListener
 import ru.daystream.calc.ChatApp
 import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.TokenClient
+import ru.daystream.calc.data.UiState
 import ru.daystream.calc.net.openWs
 
 /**
@@ -73,6 +74,14 @@ class SyncService : Service() {
             delay(2000)
         }
         stopSelf()
+    }
+
+    /**
+     * Смахнули карточку в недавних — скрытая часть выключается, фон остаётся.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        UiState.dismissHidden()
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {

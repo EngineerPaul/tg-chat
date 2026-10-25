@@ -60,7 +60,23 @@ button, input, textarea { font: inherit; }
 .bubble.in { align-self: flex-start; background: var(--in); }
 .bubble.jump { box-shadow: 0 0 0 2px var(--accent); }
 .bubble .time { font-size: 11px; color: var(--muted); text-align: right; }
-.solo-emoji { font-size: 40px; line-height: 1.15; }
+.msgwrap { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+.solo-emoji { font-size: 60px; line-height: 1.1; }
+.pack-emoji { font-size: 40px; line-height: 1.15; }
+.jumpnow {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 48px;
+  height: 48px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+  opacity: 0.7;
+}
 .ticks { margin-left: 4px; letter-spacing: -1px; }
 .ticks.sent, .ticks.delivered { color: var(--muted); }
 .ticks.read { color: #4faeef; }

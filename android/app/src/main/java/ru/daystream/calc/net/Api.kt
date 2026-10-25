@@ -32,6 +32,11 @@ const val BASE = "https://daystream.ru/extra/chat/api/"
 data class TextSend(val text: String, val reply_to_id: Long? = null)
 
 /**
+ * Тело «прочитано». Пустой объект — все входящие диалога.
+ */
+data class ReadBody(val up_to_id: Long? = null)
+
+/**
  * REST-методы чата.
  */
 interface ChatApi {
@@ -82,7 +87,7 @@ interface ChatApi {
 
     /** Прочитать. */
     @POST("dialogs/{id}/read")
-    suspend fun read(@Header("Authorization") auth: String, @Path("id") id: Long, @Body body: Map<String, Any?>): Map<String, Any>
+    suspend fun read(@Header("Authorization") auth: String, @Path("id") id: Long, @Body body: ReadBody): Map<String, Any>
 
     /** Правка. */
     @PATCH("messages/{id}")

@@ -32,6 +32,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.AlertDialog
@@ -51,13 +52,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -81,6 +85,7 @@ import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.TokenClient
 import ru.daystream.calc.media.MediaVault
 import ru.daystream.calc.media.PhotoCompressor
+import ru.daystream.calc.net.ReadBody
 import ru.daystream.calc.net.TextSend
 import ru.daystream.calc.net.openWs
 import java.io.ByteArrayOutputStream
@@ -108,6 +113,7 @@ fun ChatRoot(
 ) {
     val client = remember { TokenClient(store) }
     val dialogs = remember { mutableStateListOf<Map<String, Any>>() }
+    val unreadCounts = remember { mutableStateMapOf<Long, Int>() }
     val messages = remember { mutableStateListOf<Map<String, Any>>() }
     val active = remember { mutableStateOf<Map<String, Any>?>(null) }
     val listMode = remember { mutableStateOf(true) }
@@ -262,10 +268,33 @@ fun ChatRoot(
     }
 
     /**
+     * Подставить список диалогов и живые счётчики непрочитанных.
+     */
+    fun applyDialogs(list: List<Map<String, Any>>) {
+        dialogs.clear()
+        dialogs.addAll(list)
+        list.forEach { row ->
+            val id = row["id"].asLong() ?: return@forEach
+            unreadCounts[id] = row["unread"].asLong()?.toInt() ?: 0
+        }
+    }
+
+    /**
+     * Записать бейдж; отдельная карта, чтобы Compose точно перерисовал строку.
+     */
+    fun setUnreadCount(dialogId: Long, unread: Int) {
+        unreadCounts[dialogId] = unread
+        val idx = dialogs.indexOfFirst { it["id"].asLong() == dialogId }
+        if (idx < 0) return
+        dialogs[idx] = dialogs[idx].toMutableMap().apply { put("unread", unread) }
+    }
+
+    /**
      * Прокрутить к оригиналу ответа, подгрузив старше при необходимости.
      */
     fun jumpToReply(id: Long) {
         val dialogId = active.value?.get("id").asLong() ?: return
+        stickBottom.value = false
         scope.launch {
             var guard = 0
             while (messages.none { it["id"].asLong() == id } && hasMore.value && guard < 20) {
@@ -288,7 +317,7 @@ fun ChatRoot(
                     listState.scrollToItem(index)
                 } catch (_: Exception) { }
             }
-            delay(1600)
+            delay(5000)
             if (highlightId.value == id) highlightId.value = null
         }
     }
@@ -298,14 +327,13 @@ fun ChatRoot(
             val profileMe = client.call { auth -> me(auth) }
             meId.value = profileMe["id"].asLong()
             val list = asMapList(client.call { auth -> dialogs(auth) })
-            dialogs.clear()
-            dialogs.addAll(list)
+            applyDialogs(list)
             if (list.size == 1) {
                 val onlyId = list[0]["id"].asLong()
                 if (onlyId != null) {
                     active.value = list[0]
                     listMode.value = false
-                    loadMsgs(client, onlyId, messages, dialogs, hasMore, vault) { readyTick.value = readyTick.value + 1 }
+                    loadMsgs(client, onlyId, messages, dialogs, unreadCounts, hasMore, vault) { readyTick.value = readyTick.value + 1 }
                 }
             }
         } catch (_: Exception) { }
@@ -314,10 +342,17 @@ fun ChatRoot(
 
     LaunchedEffect(listMode.value, bootDone.value) {
         if (!bootDone.value || !listMode.value) return@LaunchedEffect
+        val leaving = active.value?.get("id").asLong()
+        if (leaving != null) {
+            try {
+                client.call { auth -> read(auth, leaving, ReadBody()) }
+            } catch (_: Exception) { }
+            setUnreadCount(leaving, 0)
+        }
         try {
             val list = asMapList(client.call { auth -> dialogs(auth) })
-            dialogs.clear()
-            dialogs.addAll(list)
+            applyDialogs(list)
+            if (leaving != null) setUnreadCount(leaving, 0)
         } catch (_: Exception) { }
     }
 
@@ -379,7 +414,7 @@ fun ChatRoot(
                                     if (upTo != null) {
                                         try {
                                             client.call { auth ->
-                                                read(auth, dialogId, mapOf<String, Any?>("up_to_id" to upTo))
+                                                read(auth, dialogId, ReadBody(up_to_id = upTo))
                                             }
                                         } catch (_: Exception) { }
                                     }
@@ -387,12 +422,13 @@ fun ChatRoot(
                             }
                             refreshDialogPreview(dialogs, msg)
                             if (dialogId != null && !mine) {
-                                if (looking) setUnread(dialogs, dialogId, 0) else bumpUnread(dialogs, dialogId)
+                                if (looking) setUnreadCount(dialogId, 0)
+                                else setUnreadCount(dialogId, (unreadCounts[dialogId] ?: 0) + 1)
                             }
                         }
                         "caught_up" -> {
                             val dialogId = data.optLong("dialog_id")
-                            if (dialogId != 0L) setUnread(dialogs, dialogId, 0)
+                            if (dialogId != 0L) setUnreadCount(dialogId, 0)
                         }
                         "delivered", "read" -> {
                             val ids = mutableListOf<Long>()
@@ -519,7 +555,7 @@ fun ChatRoot(
                                 dialogs.add(0, row)
                                 active.value = row
                                 listMode.value = false
-                                loadMsgs(client, row["id"].asLong() ?: return@launch, messages, dialogs, hasMore, vault) { readyTick.value = readyTick.value + 1 }
+                                loadMsgs(client, row["id"].asLong() ?: return@launch, messages, dialogs, unreadCounts, hasMore, vault) { readyTick.value = readyTick.value + 1 }
                             } catch (_: Exception) { }
                         }
                     }) { Text("OK") }
@@ -527,12 +563,15 @@ fun ChatRoot(
             )
             LazyColumn {
                 itemsIndexed(dialogs, key = { _, d -> d["id"].asLong() ?: d.hashCode().toLong() }) { _, d ->
-                    DialogRow(d) {
+                    val dialogId = d["id"].asLong()
+                    val unread = dialogId?.let { unreadCounts[it] } ?: 0
+                    DialogRow(d, unread) {
                         active.value = d
                         listMode.value = false
+                        if (dialogId != null) unreadCounts[dialogId] = 0
                         scope.launch {
                             try {
-                                loadMsgs(client, d["id"].asLong() ?: return@launch, messages, dialogs, hasMore, vault) { readyTick.value = readyTick.value + 1 }
+                                loadMsgs(client, dialogId ?: return@launch, messages, dialogs, unreadCounts, hasMore, vault) { readyTick.value = readyTick.value + 1 }
                             } catch (_: Exception) { }
                         }
                     }
@@ -541,9 +580,11 @@ fun ChatRoot(
         } else {
             val chronological = messages.sortedBy { it["id"].asLong() ?: 0L }
             val newestFirst = chronological.asReversed()
+            val farFromNow = remember { derivedStateOf { listState.firstVisibleItemIndex > 3 } }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+                modifier = Modifier.fillMaxSize(),
                 reverseLayout = true,
                 verticalArrangement = Arrangement.Top,
             ) {
@@ -580,6 +621,33 @@ fun ChatRoot(
                         )
                     }
                 }
+            }
+            if (farFromNow.value) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(12.dp)
+                        .size(48.dp)
+                        .alpha(0.7f)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .clickable {
+                            stickBottom.value = true
+                            scope.launch {
+                                try {
+                                    scrollToLatest(listState, 3000)
+                                } catch (_: Exception) { }
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.KeyboardArrowDown,
+                        contentDescription = "К текущим",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+            }
             }
             menuFor.value?.let { target ->
                 val mine = target["author_id"].asLong() == meId.value
@@ -756,10 +824,9 @@ private fun SettingsPane(themeMode: String, onTheme: (String) -> Unit, onLogout:
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun DialogRow(d: Map<String, Any>, onOpen: () -> Unit) {
+private fun DialogRow(d: Map<String, Any>, unread: Int, onOpen: () -> Unit) {
     val peer = d.map("peer")
     val name = (peer?.get("display_name") ?: peer?.get("login") ?: "").toString()
-    val unread = d["unread"].asLong()?.toInt() ?: 0
     val online = peer?.get("online") == true
     Row(
         Modifier.fillMaxWidth().combinedClickable(onClick = onOpen).padding(horizontal = 12.dp, vertical = 10.dp),
@@ -823,7 +890,17 @@ private fun MessageBubble(
     val reply = m.map("reply_to")
     val atts = asMapList(m["attachments"])
     val body = m.str("text").trim()
-    val soloEmoji = atts.isEmpty() && reply == null && isSoloEmoji(body)
+    val emojiCount = if (atts.isEmpty() && reply == null) emojiOnlyCount(body) else 0
+    val emojiSize = when {
+        emojiCount == 1 -> 60.sp
+        emojiCount > 1 -> 40.sp
+        else -> 16.sp
+    }
+    val emojiLine = when {
+        emojiCount == 1 -> 66.sp
+        emojiCount > 1 -> 44.sp
+        else -> 22.sp
+    }
     BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 3.dp)) {
         val bubbleMax = maxWidth * 0.91f
         Row(
@@ -867,8 +944,8 @@ private fun MessageBubble(
                 Text(
                     body,
                     color = if (dark) Color(0xFFF5F5F5) else Color(0xFF111111),
-                    fontSize = if (soloEmoji) 40.sp else 16.sp,
-                    lineHeight = if (soloEmoji) 44.sp else 22.sp,
+                    fontSize = emojiSize,
+                    lineHeight = emojiLine,
                 )
             } else if (atts.isEmpty()) {
                 val fallback = previewText(m).trim()
@@ -892,14 +969,8 @@ private fun MessageBubble(
     }
 }
 
-private fun isSoloEmoji(text: String): Boolean {
-    if (text.isEmpty() || text.any { it.isWhitespace() }) return false
-    val it = BreakIterator.getCharacterInstance(Locale.ROOT)
-    it.setText(text)
-    val start = it.first()
-    val end = it.next()
-    if (end == BreakIterator.DONE || it.next() != BreakIterator.DONE) return false
-    val cluster = text.substring(start, end)
+private fun isEmojiCluster(cluster: String): Boolean {
+    if (cluster.isBlank()) return false
     return cluster.any { ch ->
         val type = Character.getType(ch)
         type == Character.OTHER_SYMBOL.toInt() ||
@@ -908,6 +979,29 @@ private fun isSoloEmoji(text: String): Boolean {
             ch == '\uFE0F' ||
             ch == '\u20E3'
     }
+}
+
+/**
+ * Сколько эмодзи в тексте, если кроме них ничего нет (пробелы можно). 0 — не только смайлики.
+ */
+private fun emojiOnlyCount(text: String): Int {
+    val t = text.trim()
+    if (t.isEmpty()) return 0
+    val it = BreakIterator.getCharacterInstance(Locale.ROOT)
+    it.setText(t)
+    var count = 0
+    var start = it.first()
+    var end = it.next()
+    while (end != BreakIterator.DONE) {
+        val cluster = t.substring(start, end)
+        if (!cluster.isBlank()) {
+            if (!isEmojiCluster(cluster)) return 0
+            count += 1
+        }
+        start = end
+        end = it.next()
+    }
+    return count
 }
 
 private fun previewText(m: Map<*, *>): String {
@@ -931,6 +1025,7 @@ private suspend fun loadMsgs(
     id: Long,
     messages: MutableList<Map<String, Any>>,
     dialogs: MutableList<Map<String, Any>>,
+    unreadCounts: MutableMap<Long, Int>,
     hasMore: MutableState<Boolean>,
     vault: MediaVault,
     onReady: () -> Unit,
@@ -940,9 +1035,12 @@ private suspend fun loadMsgs(
     messages.clear()
     messages.addAll(list)
     hasMore.value = data["has_more"] == true
+    unreadCounts[id] = 0
+    setUnread(dialogs, id, 0)
     try {
-        client.call { auth -> read(auth, id, emptyMap<String, Any?>()) }
+        client.call { auth -> read(auth, id, ReadBody()) }
     } catch (_: Exception) { }
+    unreadCounts[id] = 0
     setUnread(dialogs, id, 0)
     try {
         vault.ensureMessages(list, onReady)
@@ -953,13 +1051,6 @@ private fun setUnread(dialogs: MutableList<Map<String, Any>>, dialogId: Long, un
     val idx = dialogs.indexOfFirst { it["id"].asLong() == dialogId }
     if (idx < 0) return
     dialogs[idx] = dialogs[idx].toMutableMap().apply { put("unread", unread) }
-}
-
-private fun bumpUnread(dialogs: MutableList<Map<String, Any>>, dialogId: Long) {
-    val idx = dialogs.indexOfFirst { it["id"].asLong() == dialogId }
-    if (idx < 0) return
-    val cur = dialogs[idx]["unread"].asLong()?.toInt() ?: 0
-    dialogs[idx] = dialogs[idx].toMutableMap().apply { put("unread", cur + 1) }
 }
 
 private suspend fun loadOlder(
@@ -1008,15 +1099,19 @@ private fun updatePeerPresence(
     active.value?.let { active.value = patch(it) }
 }
 
-private suspend fun scrollToLatest(state: LazyListState) {
+private suspend fun scrollToLatest(state: LazyListState, durationMs: Int = 200) {
     val avg = state.layoutInfo.visibleItemsInfo.maxOfOrNull { it.size } ?: 80
     val px = (state.firstVisibleItemIndex * avg + state.firstVisibleItemScrollOffset).toFloat()
     if (px > 0f) {
         try {
-            state.animateScrollBy(-px, tween(200))
+            state.animateScrollBy(-px, tween(durationMs))
         } catch (_: Exception) { }
     }
-    state.scrollToItem(0)
+    if (durationMs < 800) {
+        try {
+            state.scrollToItem(0)
+        } catch (_: Exception) { }
+    }
 }
 
 private fun maybeGzip(bytes: ByteArray): Pair<ByteArray, Boolean> {

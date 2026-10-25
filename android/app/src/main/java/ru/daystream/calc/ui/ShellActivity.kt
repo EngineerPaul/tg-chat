@@ -18,7 +18,7 @@ import ru.daystream.calc.sync.SyncService
  */
 class ShellActivity : ComponentActivity() {
     /**
-     * Показать калькулятор или сразу чат, если окно 5 минут.
+     * Показать калькулятор. Иконка никогда не открывает чат.
      */
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -27,7 +27,7 @@ class ShellActivity : ComponentActivity() {
             val sync = Intent(this, SyncService::class.java)
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(sync) else startService(sync)
         }
-        openChatIfWindow()
+        if (intent?.action == Intent.ACTION_MAIN) UiState.dismissHidden()
         val store = getSharedPreferences("calc_hist", MODE_PRIVATE)
         val theme = ThemeStore(this)
         setContent {
@@ -46,12 +46,12 @@ class ShellActivity : ComponentActivity() {
     }
 
     /**
-     * Иконка при живом процессе: вернуть чат только в окне 5 минут.
+     * Иконка на рабочем столе: всегда калькулятор, ни кадра чата.
      */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        openChatIfWindow()
+        if (intent.action == Intent.ACTION_MAIN) UiState.dismissHidden()
     }
 
     /**
@@ -61,12 +61,6 @@ class ShellActivity : ComponentActivity() {
         super.onResume()
         if (UiState.minimizedAt != 0L && !UiState.withinFiveMinutes()) {
             UiState.minimizedAt = 0L
-        }
-    }
-
-    private fun openChatIfWindow() {
-        if (UiState.withinFiveMinutes()) {
-            startActivity(Intent(this, ChatActivity::class.java))
         }
     }
 }
