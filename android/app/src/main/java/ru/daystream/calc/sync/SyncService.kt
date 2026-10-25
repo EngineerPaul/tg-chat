@@ -20,6 +20,7 @@ import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.TokenClient
 import ru.daystream.calc.data.UiState
 import ru.daystream.calc.net.openWs
+import ru.daystream.calc.push.registerFcm
 
 /**
  * Фон: WebSocket и обновление access, без постоянного уведомления.
@@ -59,6 +60,7 @@ class SyncService : Service() {
     private suspend fun loop() {
         val store = SessionStore(this)
         val tokens = TokenClient(store)
+        registerFcm(store)
         while (store.hasSession()) {
             tokens.refreshIfNeeded()
             var closed = false

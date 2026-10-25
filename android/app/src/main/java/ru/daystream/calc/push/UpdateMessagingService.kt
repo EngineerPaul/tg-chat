@@ -6,15 +6,26 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.UiState
 import ru.daystream.calc.ui.ActivationActivity
 import ru.daystream.calc.ui.ChatActivity
-import ru.daystream.calc.ui.ShellActivity
 
 /**
  * FCM: текст только «Доступно новое обновление».
  */
 class UpdateMessagingService : FirebaseMessagingService() {
+    /**
+     * Google сменил токен — обновить на сервере.
+     */
+    override fun onNewToken(token: String) {
+        val store = SessionStore(this)
+        CoroutineScope(Dispatchers.IO).launch { registerFcm(store) }
+    }
+
     /**
      * Показать маскировочное уведомление.
      */

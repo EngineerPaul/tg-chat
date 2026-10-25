@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -11,7 +12,7 @@ android {
         applicationId = "ru.daystream.calc"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
+        versionCode = 18
         versionName = "1.1"
     }
     buildTypes {

@@ -4,14 +4,14 @@ services:
       context: ./backend
     container_name: chat-backend
     restart: unless-stopped
+    env_file:
+      - ./secrets/.env
     environment:
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
-      CORS_ORIGINS: ${CORS_ORIGINS:-https://daystream.ru}
-      PUBLIC_BASE: ${PUBLIC_BASE:-https://daystream.ru/extra/chat}
       DATA_DIR: /data
-      FIREBASE_CREDENTIALS: ${FIREBASE_CREDENTIALS:-}
+      FIREBASE_CREDENTIALS: /data/firebase.json
     volumes:
       - chat_data:/data
+      - ./secrets/firebase.json:/data/firebase.json:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/extra/chat/api/health')"]
       interval: 30s

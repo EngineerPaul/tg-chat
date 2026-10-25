@@ -26,6 +26,7 @@ android/build/
 android/**/build/
 android/local.properties
 android/**/google-services.json
+google-services.json
 *.iml
 .idea/
 *.apk
@@ -37,6 +38,9 @@ android/**/google-services.json
 .env
 .env.*
 !.env.example
+firebase.txt
+secrets/
+*firebase-adminsdk*.json
 
 # OS
 .DS_Store
