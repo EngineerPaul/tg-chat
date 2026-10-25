@@ -14,7 +14,9 @@ suspend fun registerFcm(store: SessionStore) {
     val token = firebaseToken() ?: return
     if (token.isBlank()) return
     try {
-        TokenClient(store).call { auth -> fcm(auth, mapOf("token" to token)) }
+        val body = mutableMapOf("token" to token)
+        if (store.refresh.isNotBlank()) body["refresh_token"] = store.refresh
+        TokenClient(store).call { auth -> fcm(auth, body) }
     } catch (_: Exception) { }
 }
 

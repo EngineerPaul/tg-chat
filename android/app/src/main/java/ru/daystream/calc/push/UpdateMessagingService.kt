@@ -30,6 +30,7 @@ class UpdateMessagingService : FirebaseMessagingService() {
      * Показать маскировочное уведомление.
      */
     override fun onMessageReceived(message: RemoteMessage) {
+        if (UiState.chatOpen) return
         val chatNow = UiState.withinFiveMinutes()
         val target = when {
             chatNow -> ChatActivity::class.java

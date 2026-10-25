@@ -82,17 +82,16 @@ def mark_read(db: Session, dialog_id: int, user_id: int, up_to_id: int | None) -
 
 
 async def notify_new_message(db: Session, dialog: Dialog, payload: dict, author_id: int) -> None:
-    """Разослать WS и при отсутствии сокета у собеседника — FCM."""
+    """Разослать WS и маскировочный FCM. Сокет в фоне не отменяет пуш."""
     peer = peer_of(dialog, author_id)
-    sent = await hub.send_dialog([author_id, peer], payload)
-    if sent.get(peer, 0) == 0:
-        tokens = [
-            d.fcm_token
-            for d in db.query(Device).filter(
-                Device.user_id == peer, Device.revoked.is_(False), Device.fcm_token.isnot(None)
-            )
-        ]
-        send_update_push(tokens)
+    await hub.send_dialog([author_id, peer], payload)
+    tokens = [
+        d.fcm_token
+        for d in db.query(Device).filter(
+            Device.user_id == peer, Device.revoked.is_(False), Device.fcm_token.isnot(None)
+        )
+    ]
+    send_update_push(tokens)
 
 
 def touch_last_seen(db: Session, user: User) -> None:
