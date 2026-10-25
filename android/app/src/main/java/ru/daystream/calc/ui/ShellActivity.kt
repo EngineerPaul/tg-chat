@@ -2,7 +2,6 @@ package ru.daystream.calc.ui
 
 import android.app.NotificationManager
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -23,10 +22,7 @@ class ShellActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         getSystemService(NotificationManager::class.java).cancel(1)
-        if (SessionStore(this).hasSession()) {
-            val sync = Intent(this, SyncService::class.java)
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(sync) else startService(sync)
-        }
+        if (SessionStore(this).hasSession()) SyncService.start(this)
         if (intent?.action == Intent.ACTION_MAIN) UiState.dismissHidden()
         val store = getSharedPreferences("calc_hist", MODE_PRIVATE)
         val theme = ThemeStore(this)

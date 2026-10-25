@@ -118,8 +118,7 @@ class ActivationActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 0)
         }
-        val intent = Intent(this, SyncService::class.java)
-        if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
+        SyncService.start(this)
     }
 
     /**

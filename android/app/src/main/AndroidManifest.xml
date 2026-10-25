@@ -46,6 +46,18 @@
             android:launchMode="singleTop"
             android:autoRemoveFromRecents="true"
             android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".ui.PushOpenActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="OPEN_UPDATE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
         <service
             android:name=".sync.SyncService"
             android:exported="false"

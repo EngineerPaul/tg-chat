@@ -15,6 +15,6 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
         if (!SessionStore(context).hasSession()) return
-        context.startForegroundService(Intent(context, SyncService::class.java))
+        SyncService.start(context)
     }
 }

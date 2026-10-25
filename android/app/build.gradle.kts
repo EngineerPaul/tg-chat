@@ -12,7 +12,7 @@ android {
         applicationId = "ru.daystream.calc"
         minSdk = 26
         targetSdk = 35
-        versionCode = 20
+        versionCode = 24
         versionName = "1.1"
     }
     buildTypes {
@@ -27,6 +27,10 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+}
+
+androidComponents {
+    beforeVariants { it.enableAndroidTest = false }
 }
 
 dependencies {

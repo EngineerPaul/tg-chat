@@ -39,7 +39,6 @@ class ChatActivity : ComponentActivity() {
             return
         }
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
-        UiState.chatOpen = true
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 closeLikeArrow()
@@ -81,6 +80,7 @@ class ChatActivity : ComponentActivity() {
 
     override fun onPause() {
         hideChatSurface()
+        UiState.chatOpen = false
         super.onPause()
     }
 

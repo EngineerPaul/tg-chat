@@ -32,7 +32,8 @@ class UpdateMessagingService : FirebaseMessagingService() {
      */
     override fun onMessageReceived(message: RemoteMessage) {
         if (UiState.chatOpen) return
-        UiState.pushAt = System.currentTimeMillis()
+        val sentAt = message.data["sent_at"]?.toLongOrNull() ?: System.currentTimeMillis()
+        UiState.pushAt = sentAt
         val target = if (UiState.canOpenChatFromPush()) {
             ChatActivity::class.java
         } else {
@@ -55,6 +56,6 @@ class UpdateMessagingService : FirebaseMessagingService() {
             .setContentIntent(pi)
             .setAutoCancel(true)
             .build()
-        NotificationManagerCompat.from(this).notify(42, n)
+        NotificationManagerCompat.from(this).notify(ru.daystream.calc.ChatApp.NOTIFY_UPDATE, n)
     }
 }

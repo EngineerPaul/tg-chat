@@ -65,6 +65,9 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
@@ -83,6 +86,7 @@ import okhttp3.WebSocketListener
 import org.json.JSONObject
 import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.TokenClient
+import ru.daystream.calc.data.UiState
 import ru.daystream.calc.media.MediaVault
 import ru.daystream.calc.media.PhotoCompressor
 import ru.daystream.calc.net.ReadBody
@@ -340,6 +344,24 @@ fun ChatRoot(
         bootDone.value = true
     }
 
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, event ->
+            if (event != Lifecycle.Event.ON_RESUME) return@LifecycleEventObserver
+            if (!bootDone.value || listMode.value) return@LifecycleEventObserver
+            val id = active.value?.get("id").asLong() ?: return@LifecycleEventObserver
+            scope.launch {
+                try {
+                    loadMsgs(client, id, messages, dialogs, unreadCounts, hasMore, vault) {
+                        readyTick.value = readyTick.value + 1
+                    }
+                } catch (_: Exception) { }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
     LaunchedEffect(listMode.value, bootDone.value) {
         if (!bootDone.value || !listMode.value) return@LaunchedEffect
         val leaving = active.value?.get("id").asLong()
@@ -405,10 +427,12 @@ fun ChatRoot(
                             val author = msg["author_id"].asLong()
                             val dialogId = msg["dialog_id"].asLong()
                             val activeId = active.value?.get("id").asLong()
-                            val looking = dialogId != null && dialogId == activeId && !listMode.value
+                            val looking = dialogId != null && dialogId == activeId && !listMode.value && UiState.chatOpen
                             val mine = author != null && author == meId.value
-                            if (dialogId != null && looking) {
+                            if (dialogId != null && dialogId == activeId && !listMode.value) {
                                 upsertMessage(messages, msg)
+                            }
+                            if (dialogId != null && looking) {
                                 if (!mine) {
                                     val upTo = msg["id"].asLong()
                                     if (upTo != null) {

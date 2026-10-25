@@ -2,11 +2,9 @@ package ru.daystream.calc.sync
 
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
-import android.os.Build
 import android.os.IBinder
-import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -23,34 +21,19 @@ import ru.daystream.calc.net.openWs
 import ru.daystream.calc.push.registerFcm
 
 /**
- * Фон: WebSocket и обновление access, без постоянного уведомления.
+ * Фон: WebSocket и refresh. Без foreground — иначе точка в шторке и «приложение остановлено».
  */
 class SyncService : Service() {
     private val job = Job()
     private val scope = CoroutineScope(Dispatchers.IO + job)
     private var socket: WebSocket? = null
+    @Volatile private var looping = false
 
-    /**
-     * После startForegroundService система требует уведомление на секунду — сразу снимаем.
-     */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (Build.VERSION.SDK_INT >= 26) {
-            val n = NotificationCompat.Builder(this, ChatApp.CHANNEL_SYNC)
-                .setContentTitle("")
-                .setContentText("")
-                .setSmallIcon(android.R.drawable.stat_notify_sync)
-                .setSilent(true)
-                .setPriority(NotificationCompat.PRIORITY_MIN)
-                .build()
-            if (Build.VERSION.SDK_INT >= 29) {
-                startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-            } else {
-                startForeground(1, n)
-            }
-            stopForeground(STOP_FOREGROUND_REMOVE)
+        if (!looping) {
+            looping = true
+            scope.launch { loop() }
         }
-        getSystemService(NotificationManager::class.java).cancel(1)
-        scope.launch { loop() }
         return START_STICKY
     }
 
@@ -89,9 +72,20 @@ class SyncService : Service() {
     override fun onDestroy() {
         job.cancel()
         socket?.cancel()
-        getSystemService(NotificationManager::class.java).cancel(1)
+        getSystemService(NotificationManager::class.java).cancel(ChatApp.NOTIFY_SYNC)
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    companion object {
+        /**
+         * Старт из экрана (приложение на переднем плане). Не startForegroundService.
+         */
+        fun start(context: Context) {
+            try {
+                context.startService(Intent(context, SyncService::class.java))
+            } catch (_: IllegalStateException) { }
+        }
+    }
 }

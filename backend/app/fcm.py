@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 from app.config import settings
@@ -42,11 +43,23 @@ def send_update_push(tokens: list[str]) -> None:
 
     for token in tokens:
         try:
+            sent_at = str(int(time.time() * 1000))
             messaging.send(
                 messaging.Message(
                     token=token,
-                    android=messaging.AndroidConfig(priority="high"),
-                    data={"kind": "update"},
+                    notification=messaging.Notification(
+                        title="Обновления",
+                        body="Доступно новое обновление",
+                    ),
+                    android=messaging.AndroidConfig(
+                        priority="high",
+                        notification=messaging.AndroidNotification(
+                            channel_id="updates",
+                            icon="ic_notify_update",
+                            click_action="OPEN_UPDATE",
+                        ),
+                    ),
+                    data={"kind": "update", "sent_at": sent_at},
                 )
             )
         except Exception as exc:  # noqa: BLE001

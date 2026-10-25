@@ -25,13 +25,14 @@ class ChatApp : Application() {
             lockscreenVisibility = Notification.VISIBILITY_SECRET
         }
         nm.createNotificationChannel(sync)
-        nm.cancel(1)
         instance = this
     }
 
     companion object {
         const val CHANNEL_UPDATES = "updates"
         const val CHANNEL_SYNC = "sync_min"
+        const val NOTIFY_SYNC = 3
+        const val NOTIFY_UPDATE = 42
 
         lateinit var instance: ChatApp
             private set
