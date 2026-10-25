@@ -30,14 +30,7 @@ class ChatActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         hideChatSurface()
         getSystemService(NotificationManager::class.java).cancel(1)
-        val fromPush = intent.getBooleanExtra("from_push", false)
-        if (fromPush && UiState.canOpenChatFromPush()) {
-            UiState.closedByArrow = false
-        } else if (UiState.closedByArrow || expiredLock()) {
-            finish()
-            overridePendingTransition(0, 0)
-            return
-        }
+        if (!allowShowChat(intent)) return
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -67,6 +60,15 @@ class ChatActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    /**
+     * Тот же ChatActivity ещё жив: тап по «Обновления» снова проверяет окно.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (!allowShowChat(intent)) return
     }
 
     /**
@@ -128,8 +130,7 @@ class ChatActivity : ComponentActivity() {
             return
         }
         showChatSurface()
-        UiState.chatOpen = true
-        UiState.minimizedAt = 0L
+        UiState.enterHidden()
     }
 
     override fun onDestroy() {
@@ -154,18 +155,42 @@ class ChatActivity : ComponentActivity() {
         getSystemService(ActivityManager::class.java).appTasks.forEach { it.finishAndRemoveTask() }
     }
 
+    /**
+     * Тап по пушу и обычный вход: меньше окна — чат, иначе активация / закрыть.
+     */
+    private fun allowShowChat(incoming: Intent): Boolean {
+        val fromPush = incoming.getBooleanExtra("from_push", false)
+        if (fromPush) {
+            if (UiState.canOpenChatFromPush()) {
+                UiState.closedByArrow = false
+                return true
+            }
+            startActivity(Intent(this, ActivationActivity::class.java).putExtra("from_push", true))
+            finish()
+            overridePendingTransition(0, 0)
+            return false
+        }
+        if (UiState.closedByArrow || expiredLock()) {
+            finish()
+            overridePendingTransition(0, 0)
+            return false
+        }
+        return true
+    }
+
     private fun markMinimized() {
         if (isFinishing || isChangingConfigurations) return
         if (UiState.closedByArrow) return
-        if (UiState.chatOpen) {
-            UiState.minimizedAt = System.currentTimeMillis()
-            lockHandler.removeCallbacks(expireRunnable)
-            lockHandler.postDelayed(expireRunnable, 5 * 60 * 1000L)
-        }
+        UiState.startHiddenWindow()
+        val left = UiState.remainingHiddenMs()
+        if (left <= 0L) return
+        lockHandler.removeCallbacks(expireRunnable)
+        lockHandler.postDelayed(expireRunnable, left)
     }
 
     private fun expireToPublic() {
-        if (UiState.withinFiveMinutes() || UiState.minimizedAt == 0L) return
+        if (UiState.withinFiveMinutes()) return
+        if (UiState.minimizedAt == 0L && !UiState.closedByArrow) return
         UiState.dismissHidden()
         hideChatSurface()
         finish()
@@ -176,7 +201,7 @@ class ChatActivity : ComponentActivity() {
         if (UiState.closedByArrow) return true
         if (UiState.minimizedAt == 0L) return false
         if (UiState.withinFiveMinutes()) return false
-        UiState.chatOpen = false
+        UiState.dismissHidden()
         return true
     }
 

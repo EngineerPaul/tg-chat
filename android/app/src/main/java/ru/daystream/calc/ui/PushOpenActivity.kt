@@ -7,13 +7,11 @@ import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.UiState
 
 /**
- * Тап по FCM: чат в окне 5 минут, иначе страница ключа. Не калькулятор.
+ * Тап по «Обновления»: меньше [ChatApp.HIDDEN_WINDOW_MS] — чат, иначе ключ.
  */
 class PushOpenActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val sentAt = intent.getStringExtra("sent_at")?.toLongOrNull() ?: 0L
-        if (sentAt > 0L) UiState.pushAt = sentAt
         val store = SessionStore(this)
         val openChat = store.hasSession() && UiState.canOpenChatFromPush()
         val next = if (openChat) {

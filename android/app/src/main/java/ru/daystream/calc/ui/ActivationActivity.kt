@@ -125,9 +125,7 @@ class ActivationActivity : ComponentActivity() {
      * После верного ключа открыть скрытый чат.
      */
     private fun openChat() {
-        UiState.closedByArrow = false
-        UiState.minimizedAt = 0L
-        UiState.chatOpen = true
+        UiState.enterHidden()
         startActivity(Intent(this, ChatActivity::class.java))
         finish()
     }

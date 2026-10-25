@@ -12,8 +12,7 @@ import kotlinx.coroutines.launch
 import ru.daystream.calc.R
 import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.UiState
-import ru.daystream.calc.ui.ActivationActivity
-import ru.daystream.calc.ui.ChatActivity
+import ru.daystream.calc.ui.PushOpenActivity
 
 /**
  * FCM: текст только «Доступно новое обновление».
@@ -32,16 +31,11 @@ class UpdateMessagingService : FirebaseMessagingService() {
      */
     override fun onMessageReceived(message: RemoteMessage) {
         if (UiState.chatOpen) return
-        val sentAt = message.data["sent_at"]?.toLongOrNull() ?: System.currentTimeMillis()
-        UiState.pushAt = sentAt
-        val target = if (UiState.canOpenChatFromPush()) {
-            ChatActivity::class.java
-        } else {
-            ActivationActivity::class.java
-        }
-        val open = Intent(this, target).apply {
+        val open = Intent(this, PushOpenActivity::class.java).apply {
+            action = "OPEN_UPDATE"
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             putExtra("from_push", true)
+            message.data["sent_at"]?.let { putExtra("sent_at", it) }
         }
         val pi = PendingIntent.getActivity(
             this,

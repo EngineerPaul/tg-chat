@@ -29,6 +29,8 @@ class ChatApp : Application() {
     }
 
     companion object {
+        /** Окно скрытого чата: свернуть, тап по пушу, таймер. Менять только здесь. */
+        const val HIDDEN_WINDOW_MS = 5L * 60 * 1000
         const val CHANNEL_UPDATES = "updates"
         const val CHANNEL_SYNC = "sync_min"
         const val NOTIFY_SYNC = 3

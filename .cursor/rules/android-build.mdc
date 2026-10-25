@@ -1,0 +1,6 @@
+---
+description: When the user says a-b, unlock the Android Gradle build
+alwaysApply: true
+---
+
+If the user says **a-b** (or asks to prepare an Android build / unlock Gradle), follow `android-build.md` at the repo root. Run every step. Do not kill Android Studio. Do not change app source. When done, say whether they can assemble the APK.
