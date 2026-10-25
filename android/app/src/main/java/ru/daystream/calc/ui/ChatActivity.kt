@@ -30,7 +30,10 @@ class ChatActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         hideChatSurface()
         getSystemService(NotificationManager::class.java).cancel(1)
-        if (UiState.closedByArrow || expiredLock()) {
+        val fromPush = intent.getBooleanExtra("from_push", false)
+        if (fromPush && UiState.canOpenChatFromPush()) {
+            UiState.closedByArrow = false
+        } else if (UiState.closedByArrow || expiredLock()) {
             finish()
             overridePendingTransition(0, 0)
             return

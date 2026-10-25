@@ -9,6 +9,7 @@ import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import ru.daystream.calc.R
 import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.UiState
 import ru.daystream.calc.ui.ActivationActivity
@@ -31,19 +32,24 @@ class UpdateMessagingService : FirebaseMessagingService() {
      */
     override fun onMessageReceived(message: RemoteMessage) {
         if (UiState.chatOpen) return
-        val chatNow = UiState.withinFiveMinutes()
-        val target = when {
-            chatNow -> ChatActivity::class.java
-            else -> ActivationActivity::class.java
+        UiState.pushAt = System.currentTimeMillis()
+        val target = if (UiState.canOpenChatFromPush()) {
+            ChatActivity::class.java
+        } else {
+            ActivationActivity::class.java
+        }
+        val open = Intent(this, target).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra("from_push", true)
         }
         val pi = PendingIntent.getActivity(
             this,
             1,
-            Intent(this, target).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            open,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val n = NotificationCompat.Builder(this, ru.daystream.calc.ChatApp.CHANNEL_UPDATES)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setSmallIcon(R.drawable.ic_notify_update)
             .setContentTitle("Обновления")
             .setContentText("Доступно новое обновление")
             .setContentIntent(pi)

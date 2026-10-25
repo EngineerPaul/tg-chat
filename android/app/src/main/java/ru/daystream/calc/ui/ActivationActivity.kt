@@ -37,6 +37,10 @@ class ActivationActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val store = SessionStore(this)
+        if (intent.getBooleanExtra("from_push", false) && store.hasSession() && UiState.canOpenChatFromPush()) {
+            openChat()
+            return
+        }
         val theme = ThemeStore(this)
         setContent {
             AppTheme(theme.mode) {

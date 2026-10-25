@@ -45,14 +45,7 @@ def send_update_push(tokens: list[str]) -> None:
             messaging.send(
                 messaging.Message(
                     token=token,
-                    notification=messaging.Notification(
-                        title="Обновления",
-                        body="Доступно новое обновление",
-                    ),
-                    android=messaging.AndroidConfig(
-                        priority="high",
-                        notification=messaging.AndroidNotification(channel_id="updates"),
-                    ),
+                    android=messaging.AndroidConfig(priority="high"),
                     data={"kind": "update"},
                 )
             )

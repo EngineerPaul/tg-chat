@@ -36,8 +36,8 @@ class SyncService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (Build.VERSION.SDK_INT >= 26) {
             val n = NotificationCompat.Builder(this, ChatApp.CHANNEL_SYNC)
-                .setContentTitle("Обновления")
-                .setContentText("Проверка обновлений")
+                .setContentTitle("")
+                .setContentText("")
                 .setSmallIcon(android.R.drawable.stat_notify_sync)
                 .setSilent(true)
                 .setPriority(NotificationCompat.PRIORITY_MIN)

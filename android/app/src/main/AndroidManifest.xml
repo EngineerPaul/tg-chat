@@ -20,6 +20,12 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Calc"
         android:usesCleartextTraffic="false">
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notify_update" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="updates" />
         <activity
             android:name=".ui.ShellActivity"
             android:exported="true"
