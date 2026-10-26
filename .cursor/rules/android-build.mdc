@@ -1,6 +1,15 @@
 ---
-description: When the user says a-b, unlock the Android Gradle build
+description: Unlock Gradle before Android Studio sync or APK build
 alwaysApply: true
 ---
 
-If the user says **a-b** (or asks to prepare an Android build / unlock Gradle), follow `android-build.md` at the repo root. Run every step. Do not kill Android Studio. Do not change app source. When done, say whether they can assemble the APK.
+# Android sync / build unlock
+
+Windows + Desktop держит файлы в `android/**/build`. Перед Gradle Sync и сборкой APK это мешает.
+
+Выполнить `android-build.md` целиком (демоны Gradle/Kotlin + блокирующие папки), когда:
+
+- человек пишет **a-b**, или просит подготовить build / sync / снять демоны;
+- в этом ходе менялись файлы под `android/` (Kotlin, Gradle, ресурсы, манифест) и человеку снова нужна **Sync Project** или **Build APK**.
+
+Не запускать после правок только web/backend. Не убивать Android Studio. Не трогать исходники, `HiddenStore`, `secrets/`. В конце сказать, можно ли собирать.

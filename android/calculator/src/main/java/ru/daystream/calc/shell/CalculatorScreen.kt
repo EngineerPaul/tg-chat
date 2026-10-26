@@ -53,12 +53,23 @@ fun CalculatorScreen(
 ) {
     val engine = remember { CalculatorEngine() }
     val expression = remember { mutableStateOf("") }
+    val justEvaluated = remember { mutableStateOf(false) }
     val tape = remember { mutableStateListOf<String>().apply { addAll(history.take(HISTORY_LIMIT)) } }
+
+    /**
+     * После «=» цифра начинает новый пример; оператор продолжает результат.
+     */
+    fun startFreshNumber() {
+        if (!justEvaluated.value) return
+        expression.value = ""
+        justEvaluated.value = false
+    }
 
     /**
      * Цифра: 12 знаков до запятой, 6 после; без лишнего нуля в начале числа.
      */
     fun appendDigit(token: String) {
+        startFreshNumber()
         val s = expression.value
         val n = currentNumber(s)
         if (n.contains('.')) {
@@ -82,10 +93,14 @@ fun CalculatorScreen(
      */
     fun append(token: String) {
         var s = expression.value.removeSuffix("...")
-        if (isErrorToken(s)) s = ""
+        if (isErrorToken(s)) {
+            s = ""
+            justEvaluated.value = false
+        }
         expression.value = s
         when {
             token in BinaryOps -> {
+                justEvaluated.value = false
                 if (s.isEmpty()) {
                     if (token == "-") expression.value = "-"
                     return
@@ -95,12 +110,16 @@ fun CalculatorScreen(
             token == "000" -> repeat(3) { appendDigit("0") }
             token == "0" -> appendDigit("0")
             token == "." -> {
+                startFreshNumber()
                 val n = currentNumber(expression.value)
                 if (n.contains('.')) return
                 expression.value += if (n.isEmpty()) "0." else "."
             }
             token.length == 1 && token[0] in '1'..'9' -> appendDigit(token)
-            else -> expression.value += token
+            else -> {
+                if (token != ")") startFreshNumber()
+                expression.value += token
+            }
         }
     }
 
@@ -112,10 +131,12 @@ fun CalculatorScreen(
         if (s.isEmpty()) return
         if (s.endsWith("...")) {
             expression.value = s.dropLast(3)
+            justEvaluated.value = false
             return
         }
         val hit = ErrorTokens.filter { s.endsWith(it) }.maxByOrNull { it.length }
         expression.value = if (hit != null) s.dropLast(hit.length) else s.dropLast(1)
+        justEvaluated.value = false
     }
 
     /**
@@ -128,22 +149,37 @@ fun CalculatorScreen(
         val result = engine.evaluate(src) ?: return
         if (result == "Ошибка") {
             expression.value = "Ошибка"
+            justEvaluated.value = false
             return
         }
         tape.add(0, "$src = $result")
         while (tape.size > HISTORY_LIMIT) tape.removeAt(tape.lastIndex)
         onHistoryChange(tape.toList())
         expression.value = result
+        justEvaluated.value = true
     }
 
     /**
-     * Подставить результат строки истории в пример.
+     * Подставить результат истории: заменить текущее число, как смену знака.
+     * Повтор того же значения ничего не меняет.
      */
     fun insertHistory(line: String) {
         val result = line.substringAfterLast(" = ").trim()
-        if (result.isEmpty()) return
-        val cur = expression.value
-        expression.value = if (cur.isBlank() || isErrorToken(cur)) result else cur + result
+        if (result.isEmpty() || isErrorToken(result)) return
+        var s = expression.value.removeSuffix("...")
+        if (s.isBlank() || isErrorToken(s) || justEvaluated.value || isBareNumber(s)) {
+            if (!s.isBlank() && !isErrorToken(s) && sameCalcNumber(s, result)) {
+                justEvaluated.value = false
+                return
+            }
+            expression.value = result
+            justEvaluated.value = false
+            return
+        }
+        val n = currentNumber(s)
+        if (sameCalcNumber(n, result)) return
+        expression.value = s.dropLast(n.length) + result
+        justEvaluated.value = false
     }
 
     /**
@@ -189,7 +225,10 @@ fun CalculatorScreen(
             onKey = { key ->
                 when (key) {
                     "hist" -> clearHistory()
-                    "C" -> expression.value = ""
+                    "C" -> {
+                        expression.value = ""
+                        justEvaluated.value = false
+                    }
                     "⌫" -> backspace()
                     "=" -> equals()
                     "x^y" -> append("^")
@@ -344,3 +383,9 @@ private fun canAppendZero(expr: String): Boolean {
 }
 
 private fun isErrorToken(value: String): Boolean = value in ErrorTokens
+
+/**
+ * Одно и то же число на экране и из истории (без «...»).
+ */
+private fun sameCalcNumber(left: String, right: String): Boolean =
+    left.removeSuffix("...") == right.removeSuffix("...")

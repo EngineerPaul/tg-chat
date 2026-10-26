@@ -2,18 +2,24 @@
 
 Windows + Desktop + Android Studio часто держат файлы в `android/**/build`. Gradle тогда падает с `Unable to delete directory`.
 
-Когда человек пишет **a-b**, выполнить этот файл целиком и после этого сказать, что можно собирать APK.
+Выполнить этот файл целиком:
 
-Не убивать Android Studio (`studio64`). Не трогать `HiddenStore`, `secrets/`, исходники.
+- человек написал **a-b** (или просит подготовить build / sync);
+- агент менял `android/` и человеку снова нужна Sync Project или сборка APK.
 
-## 1. Снять демоны Gradle / Kotlin
+После шагов сказать, что можно собирать.
 
-Остановить только процессы Java, у которых в командной строке есть `GradleDaemon`, `kotlin-daemon` или `kotlin-compiler`.
+Не убивать Android Studio (`studio64`). Можно снять её `fsnotifier` — он часто держит `build\` и Studio поднимает его снова. Не трогать `HiddenStore`, `secrets/`, исходники.
+
+## 1. Снять демоны Gradle / Kotlin и fsnotifier
+
+Остановить Java, у которых в командной строке есть `GradleDaemon`, `kotlin-daemon` или `kotlin-compiler`. Затем `fsnotifier` / `fsnotifier64`.
 
 ```powershell
 Get-CimInstance Win32_Process -Filter "Name='java.exe'" | Where-Object {
   $_.CommandLine -match 'GradleDaemon|kotlin-daemon|kotlin-compiler'
 } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+Get-Process -Name fsnotifier,fsnotifier64 -ErrorAction SilentlyContinue | Stop-Process -Force
 ```
 
 Если `android\gradlew.bat` есть — ещё `.\gradlew.bat --stop` из `android\`.
@@ -29,16 +35,24 @@ $root = "android"
 $paths = @(
   "$root\app\build\intermediates\merged_res_blame_folder",
   "$root\app\build\intermediates\packaged_res",
+  "$root\app\build\intermediates\incremental\packageDebug",
   "$root\app\build\intermediates\incremental",
   "$root\app\build\intermediates\project_dex_archive",
   "$root\app\build\intermediates\desugar_graph",
   "$root\app\build\intermediates\dex",
   "$root\calculator\build\.transforms",
+  "$root\calculator\build\intermediates\runtime_library_classes_dir",
   "$root\calculator\build\intermediates"
 )
+$empty = Join-Path $env:TEMP "tg-chat-empty-build"
+New-Item -ItemType Directory -Force -Path $empty | Out-Null
 foreach ($p in $paths) {
   if (-not (Test-Path $p)) { continue }
   Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue
+  if (Test-Path $p) {
+    cmd /c "robocopy `"$empty`" `"$p`" /mir /njh /njs /ndl /nc /ns /np >nul"
+    Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue
+  }
   if (Test-Path $p) {
     $old = "$p.old"
     if (Test-Path $old) { Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue }
@@ -46,6 +60,7 @@ foreach ($p in $paths) {
     Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
+Remove-Item -LiteralPath $empty -Recurse -Force -ErrorAction SilentlyContinue
 ```
 
 ## 3. Что сказать человеку
