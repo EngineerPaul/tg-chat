@@ -7,6 +7,7 @@ import { api, jsonOrThrow, logout } from "@/lib/api";
 import { cacheDelete, cacheMessages, loadCached } from "@/lib/cache";
 import { compressPhoto, maybeGzip } from "@/lib/compress";
 import { avatarColor, dayChipLabel, lastSeenText, sameMessageDay, shortTime } from "@/lib/format";
+import { LinkedText } from "@/lib/links";
 import { chatInForeground, playIncoming, setTabAlert } from "@/lib/notify";
 import { getAccess, getTheme, setTheme as persistTheme } from "@/lib/storage";
 
@@ -704,6 +705,7 @@ export default function ChatApp() {
                     <div className="daychip">{dayChipLabel(m.created_at)}</div>
                   ) : null}
                 <div id={`msg-${m.id}`} className={`bubble ${m.author_id === me.id ? "out" : "in"}${jumpFlash === m.id ? " jump" : ""}`} onContextMenu={(e) => {
+                  if ((e.target as HTMLElement).closest("a")) return;
                   e.preventDefault();
                   const act = prompt("reply / edit / delete", "reply");
                   if (act === "reply") setReply(m);
@@ -733,7 +735,7 @@ export default function ChatApp() {
                   ) : null}
                   {m.text?.trim() ? (
                     <div className={emojiRunClass(m.text)}>
-                      {m.text.trim()}{m.edited_at ? " (изменено)" : ""}
+                      <LinkedText text={m.text.trim()} suffix={m.edited_at ? " (изменено)" : undefined} />
                     </div>
                   ) : null}
                   <div className="time">

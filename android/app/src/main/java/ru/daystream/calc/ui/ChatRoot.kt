@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -65,6 +66,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
@@ -73,6 +77,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -994,11 +999,12 @@ private fun MessageBubble(
                 AttachmentBlock(atts, vault, readyTick, onLong) { items, start -> onOpenMedia(items, start) }
             }
             if (body.isNotBlank()) {
-                Text(
-                    body,
+                LinkedMessageText(
+                    body = body,
                     color = if (dark) Color(0xFFF5F5F5) else Color(0xFF111111),
                     fontSize = emojiSize,
                     lineHeight = emojiLine,
+                    onLong = onLong,
                 )
             } else if (atts.isEmpty()) {
                 val fallback = previewText(m).trim()
@@ -1020,6 +1026,41 @@ private fun MessageBubble(
         }
         }
     }
+}
+
+/**
+ * Текст пузыря: ссылки открываются в браузере, долгое нажатие — меню.
+ */
+@Composable
+private fun LinkedMessageText(
+    body: String,
+    color: Color,
+    fontSize: TextUnit,
+    lineHeight: TextUnit,
+    onLong: () -> Unit,
+) {
+    val uriHandler = LocalUriHandler.current
+    val linkColor = MaterialTheme.colorScheme.primary
+    val annotated = remember(body, linkColor) { linkifiedText(body, linkColor) }
+    val layout = remember { mutableStateOf<TextLayoutResult?>(null) }
+    Text(
+        text = annotated,
+        color = color,
+        fontSize = fontSize,
+        lineHeight = lineHeight,
+        onTextLayout = { layout.value = it },
+        modifier = Modifier.pointerInput(annotated) {
+            detectTapGestures(
+                onLongPress = { onLong() },
+                onTap = { pos ->
+                    val l = layout.value ?: return@detectTapGestures
+                    val off = l.getOffsetForPosition(pos)
+                    val href = annotated.getStringAnnotations(UrlTag, off, off).firstOrNull()?.item
+                    if (href != null) uriHandler.openUri(href)
+                },
+            )
+        },
+    )
 }
 
 private fun isEmojiCluster(cluster: String): Boolean {
