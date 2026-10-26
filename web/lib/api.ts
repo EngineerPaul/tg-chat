@@ -80,6 +80,21 @@ export async function register(login: string, password: string): Promise<void> {
 }
 
 /**
+ * Сменить пароль по текущей сессии. Сохраняет новую пару токенов.
+ * @param password новый пароль
+ */
+export async function changePassword(password: string): Promise<void> {
+  const refresh = getRefresh();
+  const res = await api("/auth/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password, refresh_token: refresh }),
+  });
+  const data = await jsonOrThrow<{ access_token: string; refresh_token: string }>(res);
+  setTokens(data.access_token, data.refresh_token);
+}
+
+/**
  * Выйти: отозвать refresh на сервере и стереть локально.
  */
 export async function logout(): Promise<void> {

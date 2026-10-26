@@ -26,6 +26,13 @@ class RefreshIn(BaseModel):
     refresh_token: str
 
 
+class PasswordChangeIn(BaseModel):
+    """Новый пароль и текущий refresh, чтобы обновить эту сессию."""
+
+    password: str
+    refresh_token: str
+
+
 class TokenOut(BaseModel):
     """Пара JWT после входа."""
 

@@ -5,6 +5,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -76,6 +78,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -522,6 +525,30 @@ fun ChatRoot(
                 }
             },
             onBack = { settings.value = false },
+            onChangePassword = { password, done ->
+                scope.launch {
+                    try {
+                        val res = client.call { auth ->
+                            changePassword(
+                                auth,
+                                mapOf("password" to password, "refresh_token" to store.refresh),
+                            )
+                        }
+                        val access = res["access_token"] as? String
+                        val refresh = res["refresh_token"] as? String
+                        if (access.isNullOrBlank() || refresh.isNullOrBlank()) {
+                            done("Не удалось сменить пароль")
+                            return@launch
+                        }
+                        store.access = access
+                        store.refresh = refresh
+                        store.saveKeyHash(password)
+                        done(null)
+                    } catch (_: Exception) {
+                        done("Не удалось сменить пароль")
+                    }
+                }
+            },
         )
         return
     }
@@ -837,10 +864,19 @@ fun ChatRoot(
 }
 
 @Composable
-private fun SettingsPane(themeMode: String, onTheme: (String) -> Unit, onLogout: () -> Unit, onBack: () -> Unit) {
+private fun SettingsPane(
+    themeMode: String,
+    onTheme: (String) -> Unit,
+    onLogout: () -> Unit,
+    onBack: () -> Unit,
+    onChangePassword: (String, (String?) -> Unit) -> Unit,
+) {
     val lockOn = remember { mutableStateOf(HiddenLock.enabled) }
     val minutesText = remember { mutableStateOf(HiddenLock.minutes.toString()) }
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    val newPass = remember { mutableStateOf("") }
+    val passNote = remember { mutableStateOf("") }
+    val passBusy = remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Text("Настройки", style = MaterialTheme.typography.titleLarge)
         Text("Тема", modifier = Modifier.padding(top = 16.dp), style = MaterialTheme.typography.titleMedium)
         Row {
@@ -875,6 +911,45 @@ private fun SettingsPane(themeMode: String, onTheme: (String) -> Unit, onLogout:
             )
         }
         Text("Аватар загружается на сайте.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
+        Text("Пароль", modifier = Modifier.padding(top = 16.dp), style = MaterialTheme.typography.titleMedium)
+        OutlinedTextField(
+            value = newPass.value,
+            onValueChange = { newPass.value = it; passNote.value = "" },
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            label = { Text("Новый пароль") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            enabled = !passBusy.value,
+        )
+        if (passNote.value.isNotEmpty()) {
+            Text(
+                passNote.value,
+                color = if (passNote.value == "Пароль изменён") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+        Button(
+            onClick = {
+                val value = newPass.value
+                if (!value.matches(Regex("^[A-Za-zА-Яа-яЁё0-9 ]{3,30}$"))) {
+                    passNote.value = "Пароль: 3–30 букв, цифр и пробелов, без знаков"
+                    return@Button
+                }
+                passBusy.value = true
+                onChangePassword(value) { err ->
+                    passBusy.value = false
+                    if (err == null) {
+                        newPass.value = ""
+                        passNote.value = "Пароль изменён"
+                    } else {
+                        passNote.value = err
+                    }
+                }
+            },
+            modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
+            enabled = !passBusy.value,
+        ) { Text("Сменить пароль") }
         Button(onClick = onLogout, modifier = Modifier.padding(top = 16.dp)) { Text("Выйти") }
         TextButton(onClick = onBack) { Text("Назад") }
     }

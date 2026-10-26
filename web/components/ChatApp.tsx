@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import EmojiPicker from "@/components/EmojiPicker";
-import { api, jsonOrThrow, logout } from "@/lib/api";
+import { api, changePassword, jsonOrThrow, logout } from "@/lib/api";
 import { cacheDelete, cacheMessages, loadCached } from "@/lib/cache";
 import { compressPhoto, maybeGzip } from "@/lib/compress";
 import { avatarColor, dayChipLabel, lastSeenText, sameMessageDay, shortTime } from "@/lib/format";
@@ -140,6 +140,9 @@ export default function ChatApp() {
   const [search, setSearch] = useState("");
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [settings, setSettings] = useState(false);
+  const [newPass, setNewPass] = useState("");
+  const [passNote, setPassNote] = useState("");
+  const [passBusy, setPassBusy] = useState(false);
   const [viewer, setViewer] = useState<Attachment[] | null>(null);
   const [viewerIdx, setViewerIdx] = useState(0);
   const [typing, setTyping] = useState(false);
@@ -596,6 +599,27 @@ export default function ChatApp() {
   }
 
   /**
+   * Сменить пароль: только новый, затем сохранить токены.
+   */
+  async function doChangePassword() {
+    setPassNote("");
+    if (!/^[A-Za-zА-Яа-яЁё0-9 ]{3,30}$/.test(newPass)) {
+      setPassNote("Пароль: 3–30 букв, цифр и пробелов, без знаков");
+      return;
+    }
+    setPassBusy(true);
+    try {
+      await changePassword(newPass);
+      setNewPass("");
+      setPassNote("Пароль изменён");
+    } catch (err) {
+      setPassNote(err instanceof Error ? err.message : "Не удалось сменить пароль");
+    } finally {
+      setPassBusy(false);
+    }
+  }
+
+  /**
    * Загрузить аватар.
    * @param files файл картинки
    */
@@ -793,6 +817,17 @@ export default function ChatApp() {
             <p>{me.login}</p>
             <label>Аватар<input type="file" accept="image/*" onChange={(e) => uploadAvatar(e.target.files)} /></label>
             <button className="btn" type="button" onClick={toggleTheme}>{theme === "light" ? "Тёмная тема" : "Светлая тема"}</button>
+            <label>Новый пароль
+              <input
+                type="password"
+                value={newPass}
+                onChange={(e) => { setNewPass(e.target.value); setPassNote(""); }}
+                autoComplete="new-password"
+                disabled={passBusy}
+              />
+            </label>
+            {passNote ? <p className="err" style={passNote === "Пароль изменён" ? { color: "var(--accent)" } : undefined}>{passNote}</p> : null}
+            <button className="btn" type="button" disabled={passBusy} onClick={() => void doChangePassword()}>Сменить пароль</button>
             <button className="btn" type="button" onClick={doLogout}>Выйти</button>
           </div>
         </div>

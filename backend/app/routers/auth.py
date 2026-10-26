@@ -13,7 +13,7 @@ from app.auth import (
 from app.database import get_db
 from app.deps import current_user
 from app.models import Device, User
-from app.schemas import LoginIn, RefreshIn, RegisterIn
+from app.schemas import LoginIn, PasswordChangeIn, RefreshIn, RegisterIn
 from app.serialize import user_out
 from app.validators import validate_login, validate_password
 
@@ -82,6 +82,47 @@ def refresh(body: RefreshIn, db: Session = Depends(get_db)) -> dict:
     if user is None:
         raise HTTPException(401, "Пользователь не найден")
     return {"access_token": create_access_token(user.id), "token_type": "bearer"}
+
+
+@router.post("/password")
+def change_password(
+    body: PasswordChangeIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Сменить пароль без старого. Обновить хеш и токены этой сессии."""
+    from jose import JWTError
+
+    try:
+        password = validate_password(body.password)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    try:
+        payload = decode_token(body.refresh_token, "refresh")
+        old_jti = payload["jti"]
+        if int(payload["sub"]) != user.id:
+            raise HTTPException(401, "Недействительный refresh")
+    except (JWTError, KeyError, ValueError) as exc:
+        raise HTTPException(401, "Недействительный refresh") from exc
+    user.password_hash = hash_password(password)
+    access = create_access_token(user.id)
+    refresh, jti = create_refresh_token(user.id)
+    device = db.query(Device).filter(
+        Device.refresh_jti == old_jti,
+        Device.user_id == user.id,
+        Device.revoked.is_(False),
+    ).first()
+    if device:
+        device.refresh_jti = jti
+    else:
+        db.add(Device(user_id=user.id, refresh_jti=jti))
+    db.commit()
+    return {
+        "access_token": access,
+        "refresh_token": refresh,
+        "token_type": "bearer",
+        "user": user_out(db, user),
+    }
 
 
 @router.post("/logout")

@@ -48,6 +48,10 @@ interface ChatApi {
     @POST("auth/refresh")
     suspend fun refresh(@Body body: Map<String, String>): Map<String, String>
 
+    /** Сменить пароль. */
+    @POST("auth/password")
+    suspend fun changePassword(@Header("Authorization") auth: String, @Body body: Map<String, String>): Map<String, Any>
+
     /** Выйти. */
     @POST("auth/logout")
     suspend fun logout(@Header("Authorization") auth: String, @Body body: Map<String, String>): Map<String, Any>

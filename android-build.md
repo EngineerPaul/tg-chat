@@ -1,15 +1,15 @@
-# Android build unlock (a-b)
+# Android build unlock (a-b / a-d)
 
 Windows + Desktop + Android Studio часто держат файлы в `android/**/build`. Gradle тогда падает с `Unable to delete directory`.
 
 Выполнить этот файл целиком:
 
-- человек написал **a-b** (или просит подготовить build / sync);
+- человек написал **a-b** или **a-d** (или просит подготовить build / sync);
 - агент менял `android/` и человеку снова нужна Sync Project или сборка APK.
 
 После шагов сказать, что можно собирать.
 
-Не убивать Android Studio (`studio64`). Можно снять её `fsnotifier` — он часто держит `build\` и Studio поднимает его снова. Не трогать `HiddenStore`, `secrets/`, исходники.
+Не убивать Android Studio (`studio64`). Можно снять её `fsnotifier`. Не трогать `HiddenStore`, `secrets/`, исходники. Не использовать `robocopy /mir` — его блокирует автопроверка.
 
 ## 1. Снять демоны Gradle / Kotlin и fsnotifier
 
@@ -28,15 +28,18 @@ Get-Process -Name fsnotifier,fsnotifier64 -ErrorAction SilentlyContinue | Stop-P
 
 ## 2. Удалить папки, которые Gradle не может перезаписать
 
-Корень: `android\`. Если `Remove-Item` не смог — переименовать в `*.old` и удалить уже это имя.
+Корень: `android\`. Если `Remove-Item` не смог — переименовать в `*.old`.
+
+Частые ошибки: `merged_res_blame_folder`, `packaged_res`, `incremental\packageDebug\tmp`.
 
 ```powershell
 $root = "android"
 $paths = @(
-  "$root\app\build\intermediates\merged_res_blame_folder",
-  "$root\app\build\intermediates\packaged_res",
+  "$root\app\build\intermediates\incremental\packageDebug\tmp",
   "$root\app\build\intermediates\incremental\packageDebug",
   "$root\app\build\intermediates\incremental",
+  "$root\app\build\intermediates\merged_res_blame_folder",
+  "$root\app\build\intermediates\packaged_res",
   "$root\app\build\intermediates\project_dex_archive",
   "$root\app\build\intermediates\desugar_graph",
   "$root\app\build\intermediates\dex",
@@ -44,15 +47,9 @@ $paths = @(
   "$root\calculator\build\intermediates\runtime_library_classes_dir",
   "$root\calculator\build\intermediates"
 )
-$empty = Join-Path $env:TEMP "tg-chat-empty-build"
-New-Item -ItemType Directory -Force -Path $empty | Out-Null
 foreach ($p in $paths) {
   if (-not (Test-Path $p)) { continue }
   Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue
-  if (Test-Path $p) {
-    cmd /c "robocopy `"$empty`" `"$p`" /mir /njh /njs /ndl /nc /ns /np >nul"
-    Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue
-  }
   if (Test-Path $p) {
     $old = "$p.old"
     if (Test-Path $old) { Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue }
@@ -60,10 +57,9 @@ foreach ($p in $paths) {
     Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
-Remove-Item -LiteralPath $empty -Recurse -Force -ErrorAction SilentlyContinue
 ```
 
 ## 3. Что сказать человеку
 
-- Если все папки из списка исчезли (или остались только `*.old`, которые Studio ещё держит) — **можно собирать**.
-- Если конкретную папку так и не удалось снять — назвать её: её ещё держит Android Studio. Сборку всё равно можно пробовать; при повторной ошибке снова **a-b**.
+- Если папки из списка исчезли (или остались только `*.old`) — **можно собирать**.
+- Если конкретную папку так и не удалось снять — назвать её. При повторной ошибке снова **a-b** / **a-d**.
