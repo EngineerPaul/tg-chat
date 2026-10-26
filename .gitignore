@@ -11,8 +11,8 @@ node_modules/
 web/.next/
 web/out/
 
-# Data
-data/
+# SQLite volume at repo root (not android/.../data source)
+/data/
 *.db
 *.db-wal
 *.db-shm

@@ -55,7 +55,7 @@ class ShellActivity : ComponentActivity() {
      */
     override fun onResume() {
         super.onResume()
-        if (UiState.minimizedAt != 0L && !UiState.withinFiveMinutes()) {
+        if (UiState.minimizedAt != 0L && !UiState.withinLockWindow()) {
             UiState.dismissHidden()
         }
     }

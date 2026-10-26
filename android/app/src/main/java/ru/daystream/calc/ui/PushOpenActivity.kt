@@ -7,7 +7,7 @@ import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.UiState
 
 /**
- * Тап по «Обновления»: меньше [ChatApp.HIDDEN_WINDOW_MS] — чат, иначе ключ.
+ * Тап по «Обновления»: в окне возврата — чат, иначе ключ.
  */
 class PushOpenActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

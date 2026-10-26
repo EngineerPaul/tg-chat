@@ -44,6 +44,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -70,6 +71,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -84,6 +86,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import ru.daystream.calc.HiddenLock
 import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.TokenClient
 import ru.daystream.calc.data.UiState
@@ -830,6 +833,8 @@ fun ChatRoot(
 
 @Composable
 private fun SettingsPane(themeMode: String, onTheme: (String) -> Unit, onLogout: () -> Unit, onBack: () -> Unit) {
+    val lockOn = remember { mutableStateOf(HiddenLock.enabled) }
+    val minutesText = remember { mutableStateOf(HiddenLock.minutes.toString()) }
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("Настройки", style = MaterialTheme.typography.titleLarge)
         Text("Тема", modifier = Modifier.padding(top = 16.dp), style = MaterialTheme.typography.titleMedium)
@@ -839,6 +844,30 @@ private fun SettingsPane(themeMode: String, onTheme: (String) -> Unit, onLogout:
                     Text(if (themeMode == id) "• $label" else label)
                 }
             }
+        }
+        Text("Возврат без ключа", modifier = Modifier.padding(top = 16.dp), style = MaterialTheme.typography.titleMedium)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = minutesText.value,
+                onValueChange = { raw ->
+                    val digits = raw.filter { it.isDigit() }.take(3)
+                    minutesText.value = digits
+                    digits.toIntOrNull()?.let { HiddenLock.minutes = it }
+                },
+                modifier = Modifier.weight(1f).padding(end = 12.dp),
+                enabled = lockOn.value,
+                singleLine = true,
+                suffix = { Text("мин") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+            Text("Вкл", modifier = Modifier.padding(end = 8.dp))
+            Switch(
+                checked = lockOn.value,
+                onCheckedChange = {
+                    lockOn.value = it
+                    HiddenLock.enabled = it
+                },
+            )
         }
         Text("Аватар загружается на сайте.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
         Button(onClick = onLogout, modifier = Modifier.padding(top = 16.dp)) { Text("Выйти") }

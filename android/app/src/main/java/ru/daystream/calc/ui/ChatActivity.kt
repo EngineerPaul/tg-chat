@@ -12,6 +12,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import ru.daystream.calc.HiddenLock
 import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.UiState
 import ru.daystream.calc.sync.SyncService
@@ -170,7 +171,7 @@ class ChatActivity : ComponentActivity() {
             overridePendingTransition(0, 0)
             return false
         }
-        if (UiState.closedByArrow || expiredLock()) {
+        if (expiredLock()) {
             finish()
             overridePendingTransition(0, 0)
             return false
@@ -182,14 +183,21 @@ class ChatActivity : ComponentActivity() {
         if (isFinishing || isChangingConfigurations) return
         if (UiState.closedByArrow) return
         UiState.startHiddenWindow()
+        if (!HiddenLock.enabled) {
+            lockHandler.removeCallbacks(expireRunnable)
+            return
+        }
         val left = UiState.remainingHiddenMs()
-        if (left <= 0L) return
+        if (left <= 0L) {
+            expireToPublic()
+            return
+        }
         lockHandler.removeCallbacks(expireRunnable)
         lockHandler.postDelayed(expireRunnable, left)
     }
 
     private fun expireToPublic() {
-        if (UiState.withinFiveMinutes()) return
+        if (UiState.withinLockWindow()) return
         if (UiState.minimizedAt == 0L && !UiState.closedByArrow) return
         UiState.dismissHidden()
         hideChatSurface()
@@ -198,9 +206,10 @@ class ChatActivity : ComponentActivity() {
     }
 
     private fun expiredLock(): Boolean {
+        if (!HiddenLock.enabled) return false
         if (UiState.closedByArrow) return true
         if (UiState.minimizedAt == 0L) return false
-        if (UiState.withinFiveMinutes()) return false
+        if (UiState.withinLockWindow()) return false
         UiState.dismissHidden()
         return true
     }
