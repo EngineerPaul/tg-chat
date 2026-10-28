@@ -64,6 +64,17 @@ fun jsonToMap(obj: JSONObject): Map<String, Any> {
 }
 
 /**
+ * Имя в чате: ник, если задан, иначе логин.
+ */
+fun peerDisplay(peer: Map<*, *>?): String {
+    val nick = peer?.get("nick")?.toString()?.trim().orEmpty()
+    if (nick.isNotEmpty()) return nick
+    val display = peer?.get("display_name")?.toString()?.trim().orEmpty()
+    if (display.isNotEmpty()) return display
+    return peer?.get("login")?.toString().orEmpty()
+}
+
+/**
  * Вставить или заменить сообщение по id.
  */
 fun upsertMessage(messages: MutableList<Map<String, Any>>, msg: Map<String, Any>) {

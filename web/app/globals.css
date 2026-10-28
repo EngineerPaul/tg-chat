@@ -109,6 +109,23 @@ button, input, textarea { font: inherit; }
 .empty { margin: auto; color: var(--muted); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf50; display: inline-block; margin-left: 6px; }
 .help, .install { max-width: 720px; margin: 40px auto; padding: 0 16px; line-height: 1.5; }
+.peerhit { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; cursor: pointer; }
+.profile { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+.profile-body { flex: 1; min-height: 0; overflow: auto; }
+.profile-head { text-align: center; padding: 20px 16px 12px; }
+.profile-av { width: 96px; height: 96px; margin: 0 auto 10px; font-size: 36px; }
+.profile-login { font-weight: 600; font-size: 18px; }
+.profile-nick { width: min(320px, 90%); margin: 12px auto 6px; display: block; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--input); color: var(--text); text-align: center; }
+.profile-tabs { display: flex; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); }
+.profile-tabs button { flex: 1; border: 0; background: transparent; color: var(--muted); padding: 12px; cursor: pointer; border-bottom: 2px solid transparent; }
+.profile-tabs button.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.profile-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
+.profile-grid .cell { position: relative; aspect-ratio: 1; background: #111; cursor: pointer; overflow: hidden; }
+.profile-grid img { width: 100%; height: 100%; object-fit: cover; }
+.profile-grid .play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 22px; text-shadow: 0 0 8px #000; }
+.profile-list { display: flex; flex-direction: column; }
+.profile-link, .profile-file { display: flex; align-items: center; gap: 10px; padding: 12px; border-bottom: 1px solid var(--border); color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
+.profile-empty { color: var(--muted); text-align: center; padding: 32px 12px; }
 @media (max-width: 800px) {
   .sidebar { display: none; }
   .sidebar.show { display: flex; position: absolute; inset: 0; z-index: 2; width: 100%; }

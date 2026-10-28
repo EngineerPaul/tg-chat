@@ -5,9 +5,10 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import current_user
-from app.models import Dialog, Message, User
+from app.links import extract_urls
+from app.models import Attachment, Dialog, Message, User
 from app.schemas import DialogCreateIn, ReadIn
-from app.serialize import last_message_preview, message_out, peer_of, unread_count, user_out
+from app.serialize import attachment_out, last_message_preview, message_out, peer_of, unread_count, user_out
 from app.services import get_or_create_dialog, mark_read, user_in_dialog
 from app.validators import validate_login
 from app.ws_manager import hub
@@ -80,6 +81,101 @@ def history(
     rows = q.order_by(Message.id.desc()).limit(limit).all()
     rows.reverse()
     return {"messages": [message_out(db, m, user.id) for m in rows], "has_more": len(rows) == limit}
+
+
+def _need_dialog(dialog_id: int, db: Session, user: User) -> Dialog:
+    dialog = db.get(Dialog, dialog_id)
+    if dialog is None or not user_in_dialog(dialog, user.id):
+        raise HTTPException(404, "Диалог не найден")
+    return dialog
+
+
+@router.get("/dialogs/{dialog_id}/shared/media")
+def shared_media(
+    dialog_id: int,
+    before: int | None = None,
+    limit: int = Query(default=40, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Фото и видео диалога с сервера, новые сначала."""
+    _need_dialog(dialog_id, db, user)
+    return _shared_attachments(db, dialog_id, ("photo", "video"), before, limit)
+
+
+@router.get("/dialogs/{dialog_id}/shared/files")
+def shared_files(
+    dialog_id: int,
+    before: int | None = None,
+    limit: int = Query(default=40, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Файлы диалога с сервера, новые сначала."""
+    _need_dialog(dialog_id, db, user)
+    return _shared_attachments(db, dialog_id, ("file",), before, limit)
+
+
+@router.get("/dialogs/{dialog_id}/shared/links")
+def shared_links(
+    dialog_id: int,
+    before: int | None = None,
+    limit: int = Query(default=40, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Ссылки из текстов диалога, новые сначала."""
+    _need_dialog(dialog_id, db, user)
+    q = db.query(Message).filter(
+        Message.dialog_id == dialog_id,
+        Message.deleted_at.is_(None),
+        Message.text.isnot(None),
+        (Message.text.like("%http%") | Message.text.like("%www.")),
+    )
+    if before:
+        q = q.filter(Message.id < before)
+    rows = q.order_by(Message.id.desc()).limit(limit).all()
+    items: list[dict] = []
+    for msg in rows:
+        for text, href in extract_urls(msg.text or ""):
+            items.append(
+                {
+                    "message_id": msg.id,
+                    "text": text,
+                    "href": href,
+                    "created_at": msg.created_at.isoformat() + "Z",
+                }
+            )
+    return {"items": items, "has_more": len(rows) == limit}
+
+
+def _shared_attachments(
+    db: Session,
+    dialog_id: int,
+    kinds: tuple[str, ...],
+    before: int | None,
+    limit: int,
+) -> dict:
+    """Вложения диалога нужных kind."""
+    q = (
+        db.query(Attachment, Message)
+        .join(Message, Message.id == Attachment.message_id)
+        .filter(
+            Message.dialog_id == dialog_id,
+            Message.deleted_at.is_(None),
+            Attachment.kind.in_(kinds),
+        )
+    )
+    if before:
+        q = q.filter(Attachment.id < before)
+    rows = q.order_by(Attachment.id.desc()).limit(limit).all()
+    items = []
+    for att, msg in rows:
+        item = attachment_out(att)
+        item["message_id"] = msg.id
+        item["created_at"] = msg.created_at.isoformat() + "Z"
+        items.append(item)
+    return {"items": items, "has_more": len(items) == limit}
 
 
 @router.post("/dialogs/{dialog_id}/read")

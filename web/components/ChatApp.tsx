@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import EmojiPicker from "@/components/EmojiPicker";
+import PeerProfile from "@/components/PeerProfile";
 import { api, changePassword, jsonOrThrow, logout } from "@/lib/api";
 import { cacheDelete, cacheMessages, loadCached } from "@/lib/cache";
 import { compressPhoto, maybeGzip } from "@/lib/compress";
@@ -140,6 +141,7 @@ export default function ChatApp() {
   const [search, setSearch] = useState("");
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [settings, setSettings] = useState(false);
+  const [peerProfile, setPeerProfile] = useState(false);
   const [newPass, setNewPass] = useState("");
   const [passNote, setPassNote] = useState("");
   const [passBusy, setPassBusy] = useState(false);
@@ -234,6 +236,7 @@ export default function ChatApp() {
   async function openDialog(row: DialogRow) {
     setActive(row);
     activeIdRef.current = row.id;
+    setPeerProfile(false);
     setNarrowList(false);
     const cached = (await loadCached(row.id)) as Msg[];
     if (activeIdRef.current !== row.id) return;
@@ -633,19 +636,12 @@ export default function ChatApp() {
   }
 
   /**
-   * Сохранить ник собеседника.
-   * @param nick новый ник
+   * Обновить собеседника в открытом чате и в списке.
    */
-  async function saveNick(nick: string) {
-    if (!active) return;
-    const peer = await jsonOrThrow<User>(
-      await api(`/dialogs/${active.id}/alias`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nick }),
-      }),
-    );
-    setActive({ ...active, peer });
+  function applyPeer(peer: User) {
+    const id = activeIdRef.current;
+    setActive((cur) => (cur && cur.id === id ? { ...cur, peer } : cur));
+    if (id != null) setDialogs((list) => list.map((d) => (d.id === id ? { ...d, peer } : d)));
   }
 
   const mediaOfChat = useMemo(
@@ -696,20 +692,24 @@ export default function ChatApp() {
         </div>
       </aside>
       <section className="main">
-        {active ? (
+        {active && peerProfile ? (
+          <PeerProfile
+            dialogId={active.id}
+            peer={active.peer}
+            onPeer={applyPeer}
+            onClose={() => setPeerProfile(false)}
+            onOpenMedia={(items, index) => { setViewer(items); setViewerIdx(index); }}
+          />
+        ) : active ? (
           <>
             <div className={`topbar ${flash ? "flash" : ""}`}>
-              <button className="iconbtn" type="button" onClick={() => { setActive(null); setNarrowList(true); }}>←</button>
-              <Avatar user={active.peer} />
-              <div>
-                <div><strong>{active.peer.display_name || active.peer.login}</strong></div>
-                <div className="prev">{typing ? "печатает…" : lastSeenText(active.peer.last_seen, !!active.peer.online)}</div>
-              </div>
-              <div style={{ marginLeft: "auto" }}>
-                <button className="iconbtn" type="button" onClick={() => {
-                  const nick = prompt("Ник собеседника", active.peer.nick || "") || "";
-                  saveNick(nick);
-                }}>⋮</button>
+              <button className="iconbtn" type="button" onClick={() => { setPeerProfile(false); setActive(null); setNarrowList(true); }}>←</button>
+              <div className="peerhit" onClick={() => setPeerProfile(true)}>
+                <Avatar user={active.peer} />
+                <div>
+                  <div><strong>{active.peer.display_name || active.peer.login}</strong></div>
+                  <div className="prev">{typing ? "печатает…" : lastSeenText(active.peer.last_seen, !!active.peer.online)}</div>
+                </div>
               </div>
             </div>
             <div className="msgwrap">

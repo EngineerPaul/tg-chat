@@ -121,25 +121,34 @@ class MediaVault(private val context: Context) {
         }
     }
 
+    /**
+     * Догрузить вложения профиля (медиа и файлы диалога) в скрытое хранилище.
+     */
+    suspend fun ensureAttachments(atts: List<Map<String, Any>>, onReady: () -> Unit) {
+        atts.forEach { ensureAtt(it, onReady) }
+    }
+
     private suspend fun ensureMessage(message: Map<String, Any>, onReady: () -> Unit) {
-        asMapList(message["attachments"]).forEach { att ->
-            val id = att["id"].asLong()?.toString() ?: return@forEach
-            if (!store.has(id)) {
-                val url = att.str("url")
-                if (url.isNotBlank()) {
-                    val raw = download(url) ?: return@forEach
-                    val bytes = if (att["gzip"] == true || att.str("gzip") == "true" || att.str("gzip") == "1") gunzip(raw) else raw
-                    store.put(id, bytes, att.str("orig_name").ifBlank { "file" }, att.str("mime").ifBlank { "application/octet-stream" }, att.str("kind").ifBlank { "file" })
-                    withContext(Dispatchers.Main) { onReady() }
-                }
-            }
-            val previewUrl = att.str("preview_url")
-            val previewId = previewKey(id)
-            if (previewUrl.isNotBlank() && !store.has(previewId)) {
-                val prev = download(previewUrl) ?: return@forEach
-                store.put(previewId, prev, "preview.jpg", "image/jpeg", "preview")
+        asMapList(message["attachments"]).forEach { att -> ensureAtt(att, onReady) }
+    }
+
+    private suspend fun ensureAtt(att: Map<String, Any>, onReady: () -> Unit) {
+        val id = att["id"].asLong()?.toString() ?: return
+        if (!store.has(id)) {
+            val url = att.str("url")
+            if (url.isNotBlank()) {
+                val raw = download(url) ?: return
+                val bytes = if (att["gzip"] == true || att.str("gzip") == "true" || att.str("gzip") == "1") gunzip(raw) else raw
+                store.put(id, bytes, att.str("orig_name").ifBlank { "file" }, att.str("mime").ifBlank { "application/octet-stream" }, att.str("kind").ifBlank { "file" })
                 withContext(Dispatchers.Main) { onReady() }
             }
+        }
+        val previewUrl = att.str("preview_url")
+        val previewId = previewKey(id)
+        if (previewUrl.isNotBlank() && !store.has(previewId)) {
+            val prev = download(previewUrl) ?: return
+            store.put(previewId, prev, "preview.jpg", "image/jpeg", "preview")
+            withContext(Dispatchers.Main) { onReady() }
         }
     }
 

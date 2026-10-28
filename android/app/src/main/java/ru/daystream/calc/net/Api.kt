@@ -60,6 +60,14 @@ interface ChatApi {
     @GET("users/me")
     suspend fun me(@Header("Authorization") auth: String): Map<String, Any>
 
+    /** Свой аватар. */
+    @Multipart
+    @POST("users/me/avatar")
+    suspend fun uploadAvatar(
+        @Header("Authorization") auth: String,
+        @Part file: MultipartBody.Part,
+    ): Map<String, Any>
+
     /** Привязать FCM. */
     @POST("users/me/fcm")
     suspend fun fcm(@Header("Authorization") auth: String, @Body body: Map<String, String>): Map<String, Any>
@@ -101,9 +109,19 @@ interface ChatApi {
     @DELETE("messages/{id}")
     suspend fun delete(@Header("Authorization") auth: String, @Path("id") id: Long): Map<String, Any>
 
-    /** Ник собеседника. */
+    /** Ник собеседника. Пустой — снова логин. */
     @PATCH("dialogs/{id}/alias")
     suspend fun alias(@Header("Authorization") auth: String, @Path("id") id: Long, @Body body: Map<String, String>): Map<String, Any>
+
+    /** Общие ссылки / фото / файлы диалога с сервера. kind: media | files | links */
+    @GET("dialogs/{id}/shared/{kind}")
+    suspend fun shared(
+        @Header("Authorization") auth: String,
+        @Path("id") id: Long,
+        @Path("kind") kind: String,
+        @Query("before") before: Long? = null,
+        @Query("limit") limit: Int = 40,
+    ): Map<String, Any>
 
     /** Медиа-альбом. */
     @Multipart

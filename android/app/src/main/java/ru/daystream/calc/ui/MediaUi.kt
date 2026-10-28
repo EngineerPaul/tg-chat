@@ -113,7 +113,7 @@ fun AttachmentBlock(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HiddenThumb(
+internal fun HiddenThumb(
     vault: MediaVault,
     item: ViewerItem,
     readyTick: Int,
@@ -145,7 +145,7 @@ private fun HiddenThumb(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FileRow(vault: MediaVault, item: ViewerItem, readyTick: Int, onLong: () -> Unit) {
+internal fun FileRow(vault: MediaVault, item: ViewerItem, readyTick: Int, onLong: () -> Unit) {
     val scope = rememberCoroutineScope()
     val note = remember { mutableStateOf("") }
     val ready = remember(item.id, readyTick) { vault.store.has(item.id) }

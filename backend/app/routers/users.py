@@ -105,8 +105,11 @@ def set_alias(
         .filter(ContactAlias.owner_id == user.id, ContactAlias.peer_id == peer_id)
         .first()
     )
-    nick = body.nick.strip()
-    if row:
+    nick = (body.nick or "").strip()
+    if not nick:
+        if row:
+            db.delete(row)
+    elif row:
         row.nick = nick
     else:
         db.add(ContactAlias(owner_id=user.id, peer_id=peer_id, nick=nick))

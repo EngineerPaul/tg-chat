@@ -31,7 +31,10 @@ def nick_for(db: Session, owner_id: int, peer_id: int) -> str | None:
         .filter(ContactAlias.owner_id == owner_id, ContactAlias.peer_id == peer_id)
         .first()
     )
-    return row.nick if row else None
+    if row is None:
+        return None
+    nick = (row.nick or "").strip()
+    return nick or None
 
 
 def user_out(db: Session, user: User, viewer_id: int | None = None) -> dict:

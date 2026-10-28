@@ -1,5 +1,6 @@
 package ru.daystream.calc.ui
 
+import android.graphics.Bitmap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -136,7 +137,6 @@ fun ChatRoot(
     val search = remember { mutableStateOf("") }
     val settings = remember { mutableStateOf(false) }
     val profile = remember { mutableStateOf(false) }
-    val nickDraft = remember { mutableStateOf("") }
     val replyTo = remember { mutableStateOf<Map<String, Any>?>(null) }
     val menuFor = remember { mutableStateOf<Map<String, Any>?>(null) }
     val editFor = remember { mutableStateOf<Map<String, Any>?>(null) }
@@ -147,6 +147,11 @@ fun ChatRoot(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val meId = remember { mutableStateOf<Long?>(null) }
+    val meLogin = remember { mutableStateOf("") }
+    val meAvatarUrl = remember { mutableStateOf<String?>(null) }
+    val cropBmp = remember { mutableStateOf<Bitmap?>(null) }
+    val avatarNote = remember { mutableStateOf("") }
+    val avatarBusy = remember { mutableStateOf(false) }
     val socketRef = remember { mutableStateOf<WebSocket?>(null) }
     val listState = rememberLazyListState()
     val dark = when (themeMode.value) {
@@ -189,6 +194,18 @@ fun ChatRoot(
                     readyTick.value = readyTick.value + 1
                 }
             } catch (_: Exception) { }
+        }
+    }
+    val pickAvatar = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        avatarNote.value = ""
+        scope.launch {
+            val bmp = withContext(Dispatchers.IO) { PhotoCompressor.decodeForCrop(context, uri) }
+            if (bmp == null) {
+                avatarNote.value = "Не удалось открыть фото"
+                return@launch
+            }
+            cropBmp.value = bmp
         }
     }
     val files = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -341,6 +358,8 @@ fun ChatRoot(
         try {
             val profileMe = client.call { auth -> me(auth) }
             meId.value = profileMe["id"].asLong()
+            meLogin.value = profileMe.str("login")
+            meAvatarUrl.value = profileMe.str("avatar_url").ifBlank { null }
             val list = asMapList(client.call { auth -> dialogs(auth) })
             applyDialogs(list)
             if (list.size == 1) {
@@ -513,8 +532,43 @@ fun ChatRoot(
     }
 
     if (settings.value) {
+        val crop = cropBmp.value
+        if (crop != null) {
+            AvatarCropPane(
+                bitmap = crop,
+                onCancel = { cropBmp.value = null },
+                onCrop = { square ->
+                    cropBmp.value = null
+                    avatarBusy.value = true
+                    avatarNote.value = ""
+                    scope.launch {
+                        try {
+                            val jpeg = withContext(Dispatchers.IO) { PhotoCompressor.compressSquare(square) }
+                            val part = MultipartBody.Part.createFormData(
+                                "file",
+                                "avatar.jpg",
+                                jpeg.toRequestBody("image/jpeg".toMediaType()),
+                            )
+                            val user = client.call { auth -> uploadAvatar(auth, part) }
+                            meAvatarUrl.value = user.str("avatar_url").ifBlank { null }
+                            avatarNote.value = "Фото сохранено"
+                        } catch (_: Exception) {
+                            avatarNote.value = "Не удалось сохранить фото"
+                        } finally {
+                            avatarBusy.value = false
+                        }
+                    }
+                },
+            )
+            return
+        }
         SettingsPane(
             themeMode = themeMode.value,
+            login = meLogin.value,
+            avatarUrl = meAvatarUrl.value,
+            avatarNote = avatarNote.value,
+            avatarBusy = avatarBusy.value,
+            onChangePhoto = { pickAvatar.launch("image/*") },
             onTheme = onThemeChange,
             onLogout = {
                 scope.launch {
@@ -553,18 +607,42 @@ fun ChatRoot(
         return
     }
 
+    if (profile.value) {
+        val row = active.value
+        val peerMap = row?.map("peer")
+        val dialogId = row?.get("id").asLong()
+        if (row != null && peerMap != null && dialogId != null) {
+            PeerProfilePane(
+                dialogId = dialogId,
+                peer = peerMap,
+                client = client,
+                vault = vault,
+                readyTick = readyTick,
+                backEnabled = viewer.value == null,
+                onPeer = { user ->
+                    active.value = active.value?.toMutableMap()?.apply { put("peer", user) }
+                    val idx = dialogs.indexOfFirst { it["id"].asLong() == dialogId }
+                    if (idx >= 0) dialogs[idx] = dialogs[idx].toMutableMap().apply { put("peer", user) }
+                },
+                onBack = { profile.value = false },
+                onOpenMedia = { items, start -> viewer.value = items to start },
+            )
+            viewer.value?.let { (items, start) ->
+                MediaViewer(items, start, vault, readyTick.value) { viewer.value = null }
+            }
+            return
+        }
+    }
+
     Column(Modifier.fillMaxSize().background(if (listMode.value) MaterialTheme.colorScheme.background else chatBg).imePadding()) {
         val peer = active.value?.map("peer")
         TopAppBar(
             title = {
                 if (!listMode.value && peer != null) {
                     Column(
-                        Modifier.clickable {
-                            nickDraft.value = peer["nick"]?.toString().orEmpty()
-                            profile.value = true
-                        },
+                        Modifier.clickable { profile.value = true },
                     ) {
-                        Text((peer["display_name"] ?: peer["login"]).toString(), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(peerDisplay(peer), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
                             if (typing.value) "печатает…"
                             else lastSeenText(peer["last_seen"]?.toString(), peer["online"] == true),
@@ -797,42 +875,6 @@ fun ChatRoot(
         }
     }
 
-    if (profile.value && active.value != null) {
-        AlertDialog(
-            onDismissRequest = { profile.value = false },
-            title = { Text("Профиль") },
-            text = {
-                Column {
-                    Text(active.value?.map("peer")?.get("login")?.toString() ?: "")
-                    OutlinedTextField(
-                        nickDraft.value,
-                        { nickDraft.value = it },
-                        label = { Text("Ник") },
-                        colors = readableFieldColors(),
-                        singleLine = true,
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val id = active.value?.get("id").asLong()
-                    profile.value = false
-                    if (id != null) {
-                        scope.launch {
-                            try {
-                                client.call { auth -> alias(auth, id, mapOf("nick" to nickDraft.value)) }
-                                val peerMap = (active.value?.map("peer")?.toMutableMap() ?: return@launch)
-                                peerMap["nick"] = nickDraft.value
-                                peerMap["display_name"] = nickDraft.value.ifBlank { peerMap["login"].toString() }
-                                active.value = active.value!!.toMutableMap().apply { put("peer", peerMap) }
-                            } catch (_: Exception) { }
-                        }
-                    }
-                }) { Text("Сохранить") }
-            },
-            dismissButton = { TextButton(onClick = { profile.value = false }) { Text("Закрыть") } },
-        )
-    }
     viewer.value?.let { (items, start) ->
         MediaViewer(items, start, vault, readyTick.value) { viewer.value = null }
     }
@@ -866,6 +908,11 @@ fun ChatRoot(
 @Composable
 private fun SettingsPane(
     themeMode: String,
+    login: String,
+    avatarUrl: String?,
+    avatarNote: String,
+    avatarBusy: Boolean,
+    onChangePhoto: () -> Unit,
     onTheme: (String) -> Unit,
     onLogout: () -> Unit,
     onBack: () -> Unit,
@@ -878,6 +925,25 @@ private fun SettingsPane(
     val passBusy = remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Text("Настройки", style = MaterialTheme.typography.titleLarge)
+        Text("Фото", modifier = Modifier.padding(top = 16.dp), style = MaterialTheme.typography.titleMedium)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            Box(Modifier.clickable(enabled = !avatarBusy, onClick = onChangePhoto)) {
+                CircleAvatar(login = login, url = avatarUrl, size = 72.dp, textSize = 28.sp)
+            }
+            Column(Modifier.padding(start = 16.dp).weight(1f)) {
+                Text(login.ifBlank { "Вы" }, style = MaterialTheme.typography.titleMedium)
+                TextButton(onClick = onChangePhoto, enabled = !avatarBusy) {
+                    Text(if (avatarBusy) "Сохранение…" else "Выбрать фото")
+                }
+            }
+        }
+        if (avatarNote.isNotEmpty()) {
+            Text(
+                avatarNote,
+                color = if (avatarNote == "Фото сохранено") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
         Text("Тема", modifier = Modifier.padding(top = 16.dp), style = MaterialTheme.typography.titleMedium)
         Row {
             listOf("system" to "Система", "light" to "Светлая", "dark" to "Тёмная").forEach { (id, label) ->
@@ -910,7 +976,6 @@ private fun SettingsPane(
                 },
             )
         }
-        Text("Аватар загружается на сайте.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp))
         Text("Пароль", modifier = Modifier.padding(top = 16.dp), style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(
             value = newPass.value,
@@ -959,14 +1024,15 @@ private fun SettingsPane(
 @Composable
 private fun DialogRow(d: Map<String, Any>, unread: Int, onOpen: () -> Unit) {
     val peer = d.map("peer")
-    val name = (peer?.get("display_name") ?: peer?.get("login") ?: "").toString()
+    val name = peerDisplay(peer)
+    val login = peer?.get("login")?.toString().orEmpty()
     val online = peer?.get("online") == true
     Row(
         Modifier.fillMaxWidth().combinedClickable(onClick = onOpen).padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(48.dp)) {
-            Box(Modifier.fillMaxSize().clip(CircleShape).background(avatarColor(name.ifBlank { "?" })), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().clip(CircleShape).background(avatarColor(login.ifBlank { name.ifBlank { "?" } })), contentAlignment = Alignment.Center) {
                 Text(name.take(1).uppercase(), color = Color.White, fontSize = 18.sp)
             }
             if (online) {
