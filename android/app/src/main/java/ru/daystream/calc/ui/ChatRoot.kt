@@ -382,7 +382,7 @@ fun ChatRoot(
             val id = active.value?.get("id").asLong() ?: return@LifecycleEventObserver
             scope.launch {
                 try {
-                    loadMsgs(client, id, messages, dialogs, unreadCounts, hasMore, vault) {
+                    loadMsgs(client, id, messages, dialogs, unreadCounts, hasMore, vault, reset = false) {
                         readyTick.value = readyTick.value + 1
                     }
                 } catch (_: Exception) { }
@@ -429,10 +429,14 @@ fun ChatRoot(
     }
 
     LaunchedEffect(listState, listMode.value) {
-        snapshotFlow { listState.firstVisibleItemIndex to messages.size }
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val top = info.visibleItemsInfo.maxOfOrNull { it.index } ?: 0
+            Triple(top, info.totalItemsCount, hasMore.value)
+        }
             .distinctUntilChanged()
-            .collect { (index, size) ->
-                if (!listMode.value && hasMore.value && !loadingOlder.value && size > 0 && index >= size - 4) {
+            .collect { (top, total, more) ->
+                if (!listMode.value && more && !loadingOlder.value && total > 0 && top >= total - 4) {
                     val oldest = messages.minOfOrNull { it["id"].asLong() ?: Long.MAX_VALUE } ?: return@collect
                     loadingOlder.value = true
                     try {
@@ -1263,13 +1267,19 @@ private suspend fun loadMsgs(
     unreadCounts: MutableMap<Long, Int>,
     hasMore: MutableState<Boolean>,
     vault: MediaVault,
+    reset: Boolean = true,
     onReady: () -> Unit,
 ) {
     val data = client.call { auth -> messages(auth, id) }
     val list = asMapList(data["messages"])
-    messages.clear()
-    messages.addAll(list)
-    hasMore.value = data["has_more"] == true
+    if (reset) {
+        messages.clear()
+        messages.addAll(list)
+    } else {
+        messages.removeAll { it["dialog_id"].asLong() != id }
+        list.forEach { upsertMessage(messages, it) }
+    }
+    hasMore.value = data["has_more"].asBool() || list.size >= 250
     unreadCounts[id] = 0
     setUnread(dialogs, id, 0)
     try {
@@ -1299,8 +1309,12 @@ private suspend fun loadOlder(
 ) {
     val data = client.call { auth -> messages(auth, dialogId, before = before) }
     val list = asMapList(data["messages"])
+    if (list.isEmpty()) {
+        hasMore.value = false
+        return
+    }
     list.forEach { upsertMessage(messages, it) }
-    hasMore.value = data["has_more"] == true
+    hasMore.value = data["has_more"].asBool() || list.size >= 250
     try {
         vault.ensureMessages(messages.toList(), onReady)
     } catch (_: Exception) { }

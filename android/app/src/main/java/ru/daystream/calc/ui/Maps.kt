@@ -13,6 +13,16 @@ fun Any?.asLong(): Long? = when (this) {
 }
 
 /**
+ * JSON-булево из Gson Map (Boolean / 1.0 / "true").
+ */
+fun Any?.asBool(): Boolean = when (this) {
+    is Boolean -> this
+    is Number -> toInt() != 0
+    is String -> equals("true", ignoreCase = true) || this == "1"
+    else -> false
+}
+
+/**
  * Строка из словаря.
  */
 fun Map<*, *>.str(key: String): String {

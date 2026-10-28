@@ -67,7 +67,7 @@ def open_dialog(body: DialogCreateIn, db: Session = Depends(get_db), user: User 
 def history(
     dialog_id: int,
     before: int | None = None,
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int = Query(default=250, ge=1, le=250),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:

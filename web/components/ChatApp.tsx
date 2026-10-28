@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import EmojiPicker from "@/components/EmojiPicker";
 import PeerProfile from "@/components/PeerProfile";
@@ -160,6 +160,9 @@ export default function ChatApp() {
   const meIdRef = useRef<number | null>(null);
   const applyIncomingRef = useRef<(msg: Msg) => void>(() => undefined);
   const pendingScroll = useRef<number | null>(null);
+  const loadingOlder = useRef(false);
+  const hasMoreRef = useRef(true);
+  const pinScroll = useRef<{ height: number; top: number } | null>(null);
   const [jumpFlash, setJumpFlash] = useState<number | null>(null);
   const [awayFromNow, setAwayFromNow] = useState(false);
   activeIdRef.current = active?.id ?? null;
@@ -242,9 +245,11 @@ export default function ChatApp() {
     if (activeIdRef.current !== row.id) return;
     if (cached.length) setMessages(cached);
     else setMessages([]);
-    const data = await jsonOrThrow<{ messages: Msg[] }>(await api(`/dialogs/${row.id}/messages?limit=50`));
+    hasMoreRef.current = true;
+    const data = await jsonOrThrow<{ messages: Msg[]; has_more?: boolean }>(await api(`/dialogs/${row.id}/messages?limit=250`));
     if (activeIdRef.current !== row.id) return;
     setMessages((cur) => mergeMessages(cur.filter((m) => m.dialog_id === row.id), data.messages));
+    hasMoreRef.current = data.has_more !== false && (data.has_more || data.messages.length >= 250);
     await cacheMessages(row.id, data.messages);
     await api(`/dialogs/${row.id}/read`, {
       method: "POST",
@@ -299,12 +304,16 @@ export default function ChatApp() {
     let oldest = messages[0]?.id;
     let acc = messages;
     for (let i = 0; i < 20 && oldest; i += 1) {
-      const data = await jsonOrThrow<{ messages: Msg[] }>(
-        await api(`/dialogs/${active.id}/messages?limit=50&before=${oldest}`),
+      const data = await jsonOrThrow<{ messages: Msg[]; has_more?: boolean }>(
+        await api(`/dialogs/${active.id}/messages?limit=250&before=${oldest}`),
       );
-      if (!data.messages.length) break;
+      if (!data.messages.length) {
+        hasMoreRef.current = false;
+        break;
+      }
       acc = mergeMessages(data.messages, acc);
       setMessages(acc);
+      hasMoreRef.current = data.has_more !== false && (data.has_more || data.messages.length >= 250);
       await cacheMessages(active.id, data.messages);
       if (acc.some((m) => m.id === id)) break;
       oldest = data.messages[0]?.id;
@@ -315,14 +324,27 @@ export default function ChatApp() {
    * Подгрузить старше при прокрутке вверх.
    */
   async function loadOlder() {
-    if (!active || !messages.length) return;
-    const data = await jsonOrThrow<{ messages: Msg[] }>(
-      await api(`/dialogs/${active.id}/messages?limit=50&before=${messages[0].id}`),
-    );
-    if (!data.messages.length) return;
-    const merged = [...data.messages, ...messages];
-    setMessages(merged);
-    await cacheMessages(active.id, data.messages);
+    if (!active || !messages.length || loadingOlder.current || !hasMoreRef.current) return;
+    loadingOlder.current = true;
+    const box = boxRef.current;
+    if (box) pinScroll.current = { height: box.scrollHeight, top: box.scrollTop };
+    try {
+      const data = await jsonOrThrow<{ messages: Msg[]; has_more?: boolean }>(
+        await api(`/dialogs/${active.id}/messages?limit=250&before=${messages[0].id}`),
+      );
+      if (!data.messages.length) {
+        hasMoreRef.current = false;
+        pinScroll.current = null;
+        return;
+      }
+      hasMoreRef.current = data.has_more !== false && (data.has_more || data.messages.length >= 250);
+      setMessages((cur) => mergeMessages(data.messages, cur));
+      await cacheMessages(active.id, data.messages);
+    } catch {
+      pinScroll.current = null;
+    } finally {
+      loadingOlder.current = false;
+    }
   }
 
   useEffect(() => {
@@ -436,9 +458,19 @@ export default function ChatApp() {
     };
   }, [me]);
 
+  const tailId = messages[messages.length - 1]?.id;
   useEffect(() => {
+    if (pinScroll.current) return;
     boxRef.current?.scrollTo(0, boxRef.current.scrollHeight);
-  }, [messages.length, active?.id]);
+  }, [tailId, active?.id]);
+
+  useLayoutEffect(() => {
+    const pin = pinScroll.current;
+    const box = boxRef.current;
+    if (!pin || !box) return;
+    pinScroll.current = null;
+    box.scrollTop = pin.top + (box.scrollHeight - pin.height);
+  }, [messages]);
 
   /**
    * Отправить текст или правку.

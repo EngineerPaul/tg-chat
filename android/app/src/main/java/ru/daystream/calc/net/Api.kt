@@ -86,7 +86,7 @@ interface ChatApi {
         @Header("Authorization") auth: String,
         @Path("id") id: Long,
         @Query("before") before: Long? = null,
-        @Query("limit") limit: Int = 50,
+        @Query("limit") limit: Int = 250,
     ): Map<String, Any>
 
     /** Текст. Тело ответа — сырой JSON: в Map Gson падает на null. */
