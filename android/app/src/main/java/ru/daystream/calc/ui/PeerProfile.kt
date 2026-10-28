@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,6 +29,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -78,8 +80,15 @@ fun PeerProfilePane(
     val linksLoad = remember(dialogId) { mutableStateOf(false) }
     val mediaLoad = remember(dialogId) { mutableStateOf(false) }
     val filesLoad = remember(dialogId) { mutableStateOf(false) }
+    val storage = remember(dialogId) { mutableStateOf<List<Pair<String, Long>>>(emptyList()) }
+    val cachedBytes = remember(dialogId) { mutableStateOf(0L) }
+    val cacheGen = remember(dialogId) { mutableStateOf(0) }
     val uri = LocalUriHandler.current
     val login = peer["login"]?.toString().orEmpty()
+
+    fun refreshCached() {
+        cachedBytes.value = vault.cachedBytes(storage.value)
+    }
 
     fun persistNick(value: String) {
         scope.launch {
@@ -120,13 +129,10 @@ fun PeerProfilePane(
             } else {
                 list.last()["id"].asLong()
             }
-            val page = client.call { auth -> shared(auth, dialogId, kind, before, 40) }
+            val page = client.call { auth -> shared(auth, dialogId, kind, before, 50) }
             val rows = asMapList(page["items"])
             list.addAll(rows)
-            more.value = page["has_more"] == true
-            if (kind != "links") {
-                vault.ensureAttachments(rows) { readyTick.value += 1 }
-            }
+            more.value = page["has_more"].asBool() || rows.size >= 50
         } catch (_: Exception) {
             more.value = false
         } finally {
@@ -140,6 +146,29 @@ fun PeerProfilePane(
             1 -> if (media.isEmpty()) load("media")
             2 -> if (files.isEmpty()) load("files")
         }
+    }
+
+    LaunchedEffect(dialogId) {
+        try {
+            val data = client.call { auth -> storage(auth, dialogId) }
+            storage.value = asMapList(data["items"]).mapNotNull { row ->
+                val id = row["id"].asLong()?.toString() ?: return@mapNotNull null
+                id to (row["size"].asLong()?.takeIf { it > 0 } ?: 102400L)
+            }
+            refreshCached()
+        } catch (_: Exception) { }
+    }
+
+    suspend fun prefetch(rows: List<Map<String, Any>>, from: Int) {
+        if (rows.isEmpty()) return
+        val start = from.coerceIn(0, rows.lastIndex)
+        try {
+            vault.ensureSome(rows.drop(start), 50) {
+                readyTick.value += 1
+                refreshCached()
+            }
+        } catch (_: Exception) { }
+        refreshCached()
     }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -171,6 +200,26 @@ fun PeerProfilePane(
                 colors = readableFieldColors(),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             )
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Скачано: ${formatBytes(cachedBytes.value)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    onClick = {
+                        vault.clearLocal(storage.value.map { it.first })
+                        readyTick.value += 1
+                        cachedBytes.value = 0
+                        cacheGen.value += 1
+                    },
+                    enabled = cachedBytes.value > 0,
+                ) { Text("Очистить") }
+            }
         }
         TabRow(selectedTabIndex = tab.value) {
             Tab(selected = tab.value == 0, onClick = { tab.value = 0 }, text = { Text("Ссылки") })
@@ -195,16 +244,20 @@ fun PeerProfilePane(
                     rows = media,
                     vault = vault,
                     readyTick = readyTick.value,
+                    cacheGen = cacheGen.value,
                     loading = mediaLoad.value || (media.isEmpty() && mediaMore.value),
                     onNearEnd = { load("media") },
+                    onPrefetch = { from -> prefetch(media, from) },
                     onOpen = onOpenMedia,
                 )
                 else -> ProfileFiles(
                     rows = files,
                     vault = vault,
                     readyTick = readyTick.value,
+                    cacheGen = cacheGen.value,
                     loading = filesLoad.value || (files.isEmpty() && filesMore.value),
                     onNearEnd = { load("files") },
+                    onPrefetch = { from -> prefetch(files, from) },
                 )
             }
         }
@@ -250,15 +303,35 @@ private fun ProfileMedia(
     rows: List<Map<String, Any>>,
     vault: MediaVault,
     readyTick: Int,
+    cacheGen: Int,
     loading: Boolean,
     onNearEnd: suspend () -> Unit,
+    onPrefetch: suspend (Int) -> Unit,
     onOpen: (List<ViewerItem>, Int) -> Unit,
 ) {
     val gridState = rememberLazyGridState()
+    val scope = rememberCoroutineScope()
     LaunchedEffect(gridState) {
         snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
             .distinctUntilChanged()
             .collect { idx -> if (idx >= rows.size - 6 && rows.isNotEmpty()) onNearEnd() }
+    }
+    LaunchedEffect(gridState, cacheGen, rows.size) {
+        var armed = false
+        var origin: Pair<Int, Int>? = null
+        snapshotFlow { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset }
+            .distinctUntilChanged()
+            .collect { pos ->
+                if (!armed) {
+                    if (origin == null) {
+                        origin = pos
+                        return@collect
+                    }
+                    if (pos == origin) return@collect
+                    armed = true
+                }
+                onPrefetch(pos.first)
+            }
     }
     if (rows.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -275,7 +348,14 @@ private fun ProfileMedia(
                 item = item,
                 readyTick = readyTick,
                 modifier = Modifier.fillMaxWidth().aspectRatio(1f).padding(0.5.dp),
-                onClick = { onOpen(viewerItems, index.coerceIn(0, viewerItems.lastIndex)) },
+                onClick = {
+                    scope.launch {
+                        try {
+                            vault.ensureSome(listOf(att), 1) {}
+                        } catch (_: Exception) { }
+                        onOpen(viewerItems, index.coerceIn(0, viewerItems.lastIndex))
+                    }
+                },
                 onLong = {},
             )
         }
@@ -287,14 +367,34 @@ private fun ProfileFiles(
     rows: List<Map<String, Any>>,
     vault: MediaVault,
     readyTick: Int,
+    cacheGen: Int,
     loading: Boolean,
     onNearEnd: suspend () -> Unit,
+    onPrefetch: suspend (Int) -> Unit,
 ) {
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     LaunchedEffect(listState) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
             .distinctUntilChanged()
             .collect { idx -> if (idx >= rows.size - 4 && rows.isNotEmpty()) onNearEnd() }
+    }
+    LaunchedEffect(listState, cacheGen, rows.size) {
+        var armed = false
+        var origin: Pair<Int, Int>? = null
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .distinctUntilChanged()
+            .collect { pos ->
+                if (!armed) {
+                    if (origin == null) {
+                        origin = pos
+                        return@collect
+                    }
+                    if (pos == origin) return@collect
+                    armed = true
+                }
+                onPrefetch(pos.first)
+            }
     }
     if (rows.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -303,9 +403,19 @@ private fun ProfileFiles(
         return
     }
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-        itemsIndexed(rows, key = { _, att -> att["id"].asLong() ?: att.hashCode().toLong() }) { _, att ->
+        itemsIndexed(rows, key = { _, att -> att["id"].asLong() ?: att.hashCode().toLong() }) { index, att ->
             val item = attToViewer(att) ?: return@itemsIndexed
-            Box(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+            Box(
+                Modifier
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .clickable {
+                        scope.launch {
+                            try {
+                                onPrefetch(index)
+                            } catch (_: Exception) { }
+                        }
+                    },
+            ) {
                 FileRow(vault, item, readyTick, onLong = {})
             }
         }
@@ -319,5 +429,6 @@ private fun attToViewer(att: Map<String, Any>): ViewerItem? {
         previewId = att.str("preview_url").takeIf { it.isNotBlank() }?.let { MediaVault.previewKey(id) },
         kind = att.str("kind").ifBlank { "file" },
         name = att.str("orig_name"),
+        bytes = att["size"].asLong() ?: 0L,
     )
 }

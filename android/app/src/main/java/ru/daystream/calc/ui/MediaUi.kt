@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -51,6 +50,7 @@ data class ViewerItem(
     val previewId: String?,
     val kind: String,
     val name: String,
+    val bytes: Long = 0,
 )
 
 /**
@@ -72,6 +72,7 @@ fun AttachmentBlock(
             previewId = att.str("preview_url").takeIf { it.isNotBlank() }?.let { MediaVault.previewKey(id) },
             kind = att.str("kind").ifBlank { "file" },
             name = att.str("orig_name"),
+            bytes = att["size"].asLong() ?: 0L,
         )
     }
     if (items.isEmpty()) return
@@ -134,8 +135,6 @@ internal fun HiddenThumb(
     ) {
         if (bmp != null) {
             Image(bmp.asImageBitmap(), contentDescription = item.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        } else {
-            CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp, color = Color.White)
         }
         if (item.kind == "video") {
             Text("▶", color = Color.White, modifier = Modifier.align(Alignment.Center))
@@ -160,7 +159,7 @@ internal fun FileRow(vault: MediaVault, item: ViewerItem, readyTick: Int, onLong
         Column(Modifier.weight(1f)) {
             Text(item.name.ifBlank { "Файл" }, style = MaterialTheme.typography.bodyMedium)
             Text(
-                if (ready) formatSize(meta?.size ?: 0) else "загрузка…",
+                if (ready) formatBytes((meta?.size ?: 0).toLong()) else if (item.bytes > 0) formatBytes(item.bytes) else "",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -257,8 +256,3 @@ private fun HiddenVideo(vault: MediaVault, id: String) {
     )
 }
 
-private fun formatSize(bytes: Int): String {
-    if (bytes < 1024) return "$bytes Б"
-    if (bytes < 1024 * 1024) return "${bytes / 1024} КБ"
-    return "${"%.1f".format(bytes / 1024f / 1024f)} МБ"
-}

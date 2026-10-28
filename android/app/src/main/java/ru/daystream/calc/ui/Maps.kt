@@ -23,6 +23,15 @@ fun Any?.asBool(): Boolean = when (this) {
 }
 
 /**
+ * Размер для человека: Б / КБ / МБ.
+ */
+fun formatBytes(n: Long): String {
+    if (n < 1024) return "$n Б"
+    if (n < 1024 * 1024) return "${n / 1024} КБ"
+    return "${"%.1f".format(n / 1024f / 1024f)} МБ"
+}
+
+/**
  * Строка из словаря.
  */
 fun Map<*, *>.str(key: String): String {

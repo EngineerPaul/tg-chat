@@ -120,7 +120,14 @@ interface ChatApi {
         @Path("id") id: Long,
         @Path("kind") kind: String,
         @Query("before") before: Long? = null,
-        @Query("limit") limit: Int = 40,
+        @Query("limit") limit: Int = 50,
+    ): Map<String, Any>
+
+    /** Id и размеры вложений диалога. */
+    @GET("dialogs/{id}/storage")
+    suspend fun storage(
+        @Header("Authorization") auth: String,
+        @Path("id") id: Long,
     ): Map<String, Any>
 
     /** Медиа-альбом. */

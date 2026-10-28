@@ -72,11 +72,30 @@ export default function PeerProfile({ dialogId, peer, onPeer, onClose, onOpenMed
   const loading = useRef({ links: false, media: false, files: false });
   const nickTimer = useRef<number | null>(null);
   const nickRef = useRef(peer.nick || "");
+  const [storedBytes, setStoredBytes] = useState(0);
 
   useEffect(() => {
     setNick(peer.nick || "");
     nickRef.current = peer.nick || "";
   }, [peer.id, peer.nick]);
+
+  useEffect(() => {
+    let gone = false;
+    void (async () => {
+      try {
+        const data = await jsonOrThrow<{ items: { id: number; size: number }[] }>(
+          await api(`/dialogs/${dialogId}/storage`),
+        );
+        if (gone) return;
+        setStoredBytes(data.items.reduce((sum, row) => sum + (row.size || 0), 0));
+      } catch {
+        if (!gone) setStoredBytes(0);
+      }
+    })();
+    return () => {
+      gone = true;
+    };
+  }, [dialogId]);
 
   /**
    * Сохранить ник; пустой сбрасывает на логин.
@@ -128,7 +147,7 @@ export default function PeerProfile({ dialogId, peer, onPeer, onClose, onOpenMed
               ? (list[list.length - 1] as Attachment).id
               : undefined;
         const kind = which === "media" ? "media" : which;
-        const qs = new URLSearchParams({ limit: "40" });
+        const qs = new URLSearchParams({ limit: "50" });
         if (before) qs.set("before", String(before));
         const page = await jsonOrThrow<Page<Attachment | SharedLink>>(
           await api(`/dialogs/${dialogId}/shared/${kind}?${qs}`),
@@ -202,6 +221,7 @@ export default function PeerProfile({ dialogId, peer, onPeer, onClose, onOpenMed
             }}
           />
           <div className="prev">{name !== peer.login ? `В чате: ${name}` : "В чате показывается логин"}</div>
+          {storedBytes > 0 ? <div className="prev profile-store">Вложения: {formatSize(storedBytes)}</div> : null}
         </div>
         <div className="profile-tabs">
           <button type="button" className={tab === "links" ? "on" : ""} onClick={() => setTab("links")}>Ссылки</button>
@@ -230,7 +250,7 @@ export default function PeerProfile({ dialogId, peer, onPeer, onClose, onOpenMed
                   className="cell"
                   onClick={() => onOpenMedia(media, i)}
                 >
-                  <img src={a.preview_url || a.url} alt="" />
+                  <img src={a.preview_url || a.url} alt="" loading="lazy" />
                   {a.kind === "video" ? <span className="play">▶</span> : null}
                 </div>
               ))}

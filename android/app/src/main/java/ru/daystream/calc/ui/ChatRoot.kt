@@ -1333,7 +1333,7 @@ private suspend fun loadOlder(
     list.forEach { upsertMessage(messages, it) }
     hasMore.value = data["has_more"].asBool() || list.size >= 250
     try {
-        vault.ensureMessages(messages.toList(), onReady)
+        vault.ensureMessages(list, onReady)
     } catch (_: Exception) { }
 }
 

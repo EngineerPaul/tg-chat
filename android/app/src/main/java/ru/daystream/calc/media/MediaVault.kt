@@ -40,6 +40,45 @@ class MediaVault(private val context: Context) {
     }
 
     /**
+     * Догрузить не больше [max] недостающих вложений (прокрутка чата и профиля).
+     */
+    suspend fun ensureSome(atts: List<Map<String, Any>>, max: Int = 50, onReady: () -> Unit) {
+        var n = 0
+        for (att in atts) {
+            val id = att["id"].asLong()?.toString() ?: continue
+            val needFile = !store.has(id)
+            val previewUrl = att.str("preview_url")
+            val needPreview = previewUrl.isNotBlank() && !store.has(previewKey(id))
+            if (!needFile && !needPreview) continue
+            ensureAtt(att, onReady)
+            n += 1
+            if (n >= max) break
+        }
+    }
+
+    /**
+     * Сумма orig_size по тем id, что лежат в HiddenStore.
+     */
+    fun cachedBytes(items: List<Pair<String, Long>>): Long {
+        var sum = 0L
+        for ((id, size) in items) {
+            if (store.has(id) || store.has(previewKey(id))) sum += size
+        }
+        return sum
+    }
+
+    /**
+     * Стереть вложения диалога с устройства, не с сервера.
+     */
+    @Synchronized
+    fun clearLocal(ids: List<String>) {
+        for (id in ids) {
+            store.remove(id)
+            store.remove(previewKey(id))
+        }
+    }
+
+    /**
      * Положить локальные байты сразу после отправки, без повторной загрузки.
      * @param message ответ сервера
      * @param payloads байты в том же порядке, что attachments

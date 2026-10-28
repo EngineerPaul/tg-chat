@@ -63,6 +63,21 @@ class HiddenStore(context: Context) {
         return File(dir, row.file).exists()
     }
 
+    /**
+     * Удалить скрытую копию с устройства. Сервер не трогает.
+     */
+    @Synchronized
+    fun remove(id: String) {
+        val index = readIndex()
+        val obj = index.optJSONObject(id)
+        if (obj != null) {
+            val file = obj.optString("file")
+            if (file.isNotBlank()) File(dir, file).delete()
+            index.remove(id)
+            writeIndex(index)
+        }
+    }
+
     /** Метаданные для пузыря. */
     @Synchronized
     fun meta(id: String): Meta? {

@@ -7,6 +7,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from jose import JWTError
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth import decode_token
@@ -39,6 +40,9 @@ def startup() -> None:
     """Создать таблицы SQLite при старте контейнера."""
     Path(settings.data_dir).mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE attachments SET orig_size = 102400 WHERE orig_size IS NULL OR orig_size = 0"))
+        conn.execute(text("UPDATE attachments SET size = 102400 WHERE size IS NULL OR size = 0"))
 
 
 @app.get(f"{API}/health")

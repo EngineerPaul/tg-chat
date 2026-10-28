@@ -94,7 +94,7 @@ def _need_dialog(dialog_id: int, db: Session, user: User) -> Dialog:
 def shared_media(
     dialog_id: int,
     before: int | None = None,
-    limit: int = Query(default=40, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
@@ -107,7 +107,7 @@ def shared_media(
 def shared_files(
     dialog_id: int,
     before: int | None = None,
-    limit: int = Query(default=40, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
@@ -120,7 +120,7 @@ def shared_files(
 def shared_links(
     dialog_id: int,
     before: int | None = None,
-    limit: int = Query(default=40, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict:
@@ -176,6 +176,24 @@ def _shared_attachments(
         item["created_at"] = msg.created_at.isoformat() + "Z"
         items.append(item)
     return {"items": items, "has_more": len(items) == limit}
+
+
+@router.get("/dialogs/{dialog_id}/storage")
+def dialog_storage(
+    dialog_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict:
+    """Id и размеры вложений диалога (orig_size) для подсчёта локального кэша."""
+    _need_dialog(dialog_id, db, user)
+    rows = (
+        db.query(Attachment.id, Attachment.orig_size)
+        .join(Message, Message.id == Attachment.message_id)
+        .filter(Message.dialog_id == dialog_id, Message.deleted_at.is_(None))
+        .all()
+    )
+    items = [{"id": att_id, "size": size if size and size > 0 else 102400} for att_id, size in rows]
+    return {"items": items}
 
 
 @router.post("/dialogs/{dialog_id}/read")
