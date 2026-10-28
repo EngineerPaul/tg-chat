@@ -1,7 +1,6 @@
 package ru.daystream.calc.ui
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -47,38 +46,25 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
+import ru.daystream.calc.media.AvatarCache
 import ru.daystream.calc.media.PhotoCompressor
-import java.util.concurrent.TimeUnit
 import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * Круглый аватар: фото с сервера или инициал.
+ * Круглый аватар: локальный кэш, сеть только если URL сменился.
  */
 @Composable
-fun CircleAvatar(login: String, url: String?, size: Dp = 72.dp, textSize: TextUnit = 28.sp) {
-    val bmp = remember(url) { mutableStateOf<Bitmap?>(null) }
-    val http = remember {
-        OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
-    }
-    LaunchedEffect(url) {
-        if (url.isNullOrBlank()) {
+fun CircleAvatar(login: String, url: String?, userId: Long? = null, size: Dp = 72.dp, textSize: TextUnit = 28.sp) {
+    val bmp = remember(userId) { mutableStateOf(userId?.let { AvatarCache.peek(it) }) }
+    LaunchedEffect(userId, url) {
+        if (userId == null) {
             bmp.value = null
             return@LaunchedEffect
         }
-        bmp.value = withContext(Dispatchers.IO) {
-            try {
-                http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
-                    if (!resp.isSuccessful) return@withContext null
-                    val bytes = resp.body?.bytes() ?: return@withContext null
-                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                }
-            } catch (_: Exception) {
-                null
-            }
-        }
+        val cached = AvatarCache.peek(userId)
+        if (cached != null) bmp.value = cached
+        bmp.value = withContext(Dispatchers.IO) { AvatarCache.ensure(userId, url) }
     }
     Box(
         Modifier.size(size).clip(CircleShape).background(avatarColor(login.ifBlank { "?" })),

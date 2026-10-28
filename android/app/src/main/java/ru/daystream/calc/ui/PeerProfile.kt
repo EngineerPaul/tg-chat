@@ -153,7 +153,13 @@ fun PeerProfilePane(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            CircleAvatar(login = login, url = peer["avatar_url"]?.toString()?.takeIf { it.isNotBlank() && it != "null" }, size = 96.dp, textSize = 36.sp)
+            CircleAvatar(
+                login = login,
+                url = peer["avatar_url"]?.toString()?.takeIf { it.isNotBlank() && it != "null" },
+                userId = peer["id"].asLong(),
+                size = 96.dp,
+                textSize = 36.sp,
+            )
             Text(login, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
             OutlinedTextField(
                 value = nickDraft.value,

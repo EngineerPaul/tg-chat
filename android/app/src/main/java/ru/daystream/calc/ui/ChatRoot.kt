@@ -99,6 +99,7 @@ import ru.daystream.calc.HiddenLock
 import ru.daystream.calc.data.SessionStore
 import ru.daystream.calc.data.TokenClient
 import ru.daystream.calc.data.UiState
+import ru.daystream.calc.media.AvatarCache
 import ru.daystream.calc.media.MediaVault
 import ru.daystream.calc.media.PhotoCompressor
 import ru.daystream.calc.net.ReadBody
@@ -308,6 +309,10 @@ fun ChatRoot(
         list.forEach { row ->
             val id = row["id"].asLong() ?: return@forEach
             unreadCounts[id] = row["unread"].asLong()?.toInt() ?: 0
+            val peer = row.map("peer") ?: return@forEach
+            val uid = peer["id"].asLong() ?: return@forEach
+            val url = peer.str("avatar_url").ifBlank { null }
+            scope.launch(Dispatchers.IO) { AvatarCache.ensure(uid, url) }
         }
     }
 
@@ -360,6 +365,9 @@ fun ChatRoot(
             meId.value = profileMe["id"].asLong()
             meLogin.value = profileMe.str("login")
             meAvatarUrl.value = profileMe.str("avatar_url").ifBlank { null }
+            profileMe["id"].asLong()?.let { id ->
+                AvatarCache.ensure(id, meAvatarUrl.value)
+            }
             val list = asMapList(client.call { auth -> dialogs(auth) })
             applyDialogs(list)
             if (list.size == 1) {
@@ -554,7 +562,10 @@ fun ChatRoot(
                                 jpeg.toRequestBody("image/jpeg".toMediaType()),
                             )
                             val user = client.call { auth -> uploadAvatar(auth, part) }
-                            meAvatarUrl.value = user.str("avatar_url").ifBlank { null }
+                            val url = user.str("avatar_url").ifBlank { null }
+                            meAvatarUrl.value = url
+                            val uid = user["id"].asLong() ?: meId.value
+                            if (uid != null && url != null) AvatarCache.putLocal(uid, url, jpeg)
                             avatarNote.value = "Фото сохранено"
                         } catch (_: Exception) {
                             avatarNote.value = "Не удалось сохранить фото"
@@ -569,6 +580,7 @@ fun ChatRoot(
         SettingsPane(
             themeMode = themeMode.value,
             login = meLogin.value,
+            userId = meId.value,
             avatarUrl = meAvatarUrl.value,
             avatarNote = avatarNote.value,
             avatarBusy = avatarBusy.value,
@@ -913,6 +925,7 @@ fun ChatRoot(
 private fun SettingsPane(
     themeMode: String,
     login: String,
+    userId: Long?,
     avatarUrl: String?,
     avatarNote: String,
     avatarBusy: Boolean,
@@ -932,7 +945,7 @@ private fun SettingsPane(
         Text("Фото", modifier = Modifier.padding(top = 16.dp), style = MaterialTheme.typography.titleMedium)
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
             Box(Modifier.clickable(enabled = !avatarBusy, onClick = onChangePhoto)) {
-                CircleAvatar(login = login, url = avatarUrl, size = 72.dp, textSize = 28.sp)
+                CircleAvatar(login = login, url = avatarUrl, userId = userId, size = 72.dp, textSize = 28.sp)
             }
             Column(Modifier.padding(start = 16.dp).weight(1f)) {
                 Text(login.ifBlank { "Вы" }, style = MaterialTheme.typography.titleMedium)
@@ -1036,9 +1049,13 @@ private fun DialogRow(d: Map<String, Any>, unread: Int, onOpen: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(48.dp)) {
-            Box(Modifier.fillMaxSize().clip(CircleShape).background(avatarColor(login.ifBlank { name.ifBlank { "?" } })), contentAlignment = Alignment.Center) {
-                Text(name.take(1).uppercase(), color = Color.White, fontSize = 18.sp)
-            }
+            CircleAvatar(
+                login = login.ifBlank { name },
+                url = peer?.get("avatar_url")?.toString()?.takeIf { it.isNotBlank() && it != "null" },
+                userId = peer?.get("id").asLong(),
+                size = 48.dp,
+                textSize = 18.sp,
+            )
             if (online) {
                 Box(
                     Modifier
