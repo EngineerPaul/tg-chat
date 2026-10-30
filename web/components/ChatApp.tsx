@@ -141,6 +141,7 @@ export default function ChatApp() {
   const [search, setSearch] = useState("");
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [settings, setSettings] = useState(false);
+  const [help, setHelp] = useState(false);
   const [peerProfile, setPeerProfile] = useState(false);
   const [newPass, setNewPass] = useState("");
   const [passNote, setPassNote] = useState("");
@@ -702,7 +703,7 @@ export default function ChatApp() {
       <aside className={`sidebar ${!active || narrowList ? "show" : ""}`}>
         <div className={`topbar ${flash ? "flash" : ""}`}>
           <strong>Чат</strong>
-          <button className="iconbtn" type="button" onClick={() => setSettings(true)}>⚙</button>
+          <button className="iconbtn" type="button" onClick={() => { setHelp(false); setSettings(true); }}>⚙</button>
         </div>
         <input className="search" placeholder="Поиск по логину" value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={(e) => e.key === "Enter" && findUser()} />
         <div style={{ overflow: "auto" }}>
@@ -843,8 +844,27 @@ export default function ChatApp() {
         )}
       </section>
       {settings ? (
-        <div className="modal" onClick={() => setSettings(false)}>
-          <div className="card" onClick={(e) => e.stopPropagation()} style={{ margin: "auto" }}>
+        <div
+          className="modal"
+          onClick={() => {
+            setHelp(false);
+            setSettings(false);
+          }}
+        >
+          <div className="card" onClick={(e) => e.stopPropagation()} style={{ margin: "auto", maxHeight: "90vh", overflow: "auto" }}>
+            {help ? (
+              <>
+                <button className="btn secondary" type="button" onClick={() => setHelp(false)}>Назад</button>
+                <h1>Справка</h1>
+                <div className="settings-help">
+                  <h2>Веб</h2>
+                  <p>В браузере это обычный чат, без калькулятора и ключа. Секретность — на телефоне: там снаружи калькулятор, чат открывается ключом.</p>
+                  <h2>Файлы</h2>
+                  <p>История и вложения хранятся на сервере. «Сохранить» качает копию на компьютер. Удаление сообщения убирает его у обоих. В профиле собеседника размер группы — сумма вложений этой вкладки.</p>
+                </div>
+              </>
+            ) : (
+              <>
             <h1>Настройки</h1>
             <p>{me.login}</p>
             <label>Аватар<input type="file" accept="image/*" onChange={(e) => uploadAvatar(e.target.files)} /></label>
@@ -860,7 +880,10 @@ export default function ChatApp() {
             </label>
             {passNote ? <p className="err" style={passNote === "Пароль изменён" ? { color: "var(--accent)" } : undefined}>{passNote}</p> : null}
             <button className="btn" type="button" disabled={passBusy} onClick={() => void doChangePassword()}>Сменить пароль</button>
+            <button className="btn secondary" type="button" onClick={() => setHelp(true)}>Справка</button>
             <button className="btn" type="button" onClick={doLogout}>Выйти</button>
+              </>
+            )}
           </div>
         </div>
       ) : null}

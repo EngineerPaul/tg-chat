@@ -1,6 +1,7 @@
 package ru.daystream.calc.ui
 
 import android.graphics.Bitmap
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -935,11 +936,17 @@ private fun SettingsPane(
     onBack: () -> Unit,
     onChangePassword: (String, (String?) -> Unit) -> Unit,
 ) {
+    val help = remember { mutableStateOf(false) }
     val lockOn = remember { mutableStateOf(HiddenLock.enabled) }
     val minutesText = remember { mutableStateOf(HiddenLock.minutes.toString()) }
     val newPass = remember { mutableStateOf("") }
     val passNote = remember { mutableStateOf("") }
     val passBusy = remember { mutableStateOf(false) }
+    if (help.value) {
+        BackHandler { help.value = false }
+        HelpPane(onBack = { help.value = false })
+        return
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Text("Настройки", style = MaterialTheme.typography.titleLarge)
         Text("Фото", modifier = Modifier.padding(top = 16.dp), style = MaterialTheme.typography.titleMedium)
@@ -1032,9 +1039,64 @@ private fun SettingsPane(
             modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
             enabled = !passBusy.value,
         ) { Text("Сменить пароль") }
+        TextButton(onClick = { help.value = true }, modifier = Modifier.padding(top = 8.dp).fillMaxWidth()) {
+            Text("Справка")
+        }
         Button(onClick = onLogout, modifier = Modifier.padding(top = 16.dp)) { Text("Выйти") }
         TextButton(onClick = onBack) { Text("Назад") }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HelpPane(onBack: () -> Unit) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        TopAppBar(
+            title = { Text("Справка") },
+            navigationIcon = {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                }
+            },
+        )
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+            HelpBlock(
+                "Как открыть чат",
+                "Снаружи это калькулятор. Чат открывается ключом — паролем аккаунта. Неверный ключ даёт «Неверный ключ», без слов про чат.",
+            )
+            HelpBlock(
+                "Стрелка",
+                "Стрелка или системная «назад» на списке чатов и в переписке сразу закрывает приложение. В недавних остаётся калькулятор. Окно возврата без ключа при этом не включается: снова иконка или недавние — калькулятор, уведомление — поле ключа.",
+            )
+            HelpBlock(
+                "Сворачивание",
+                "Home, недавние или другое приложение при открытом чате включают «Возврат без ключа» (минуты в настройках). Пока окно действует, иконка, недавние и уведомление снова открывают тот же экран. Когда окно кончилось — иконка и недавние показывают калькулятор, уведомление открывает поле ключа. Если переключатель выключен, чат открывается без ключа, пока не нажали стрелку.",
+            )
+            HelpBlock(
+                "Уведомления",
+                "Текст всегда «Доступно новое обновление». Имени и текста сообщений нет.",
+            )
+            HelpBlock(
+                "Выйти",
+                "Только пункт «Выйти» в настройках гасит сессию и push. Снова нужны логин и ключ. Переписка на сервере остаётся. Файлы на телефоне не стираются.",
+            )
+            HelpBlock(
+                "Файлы",
+                "Фото и файлы из ленты чата качаются вместе с сообщениями и лежат в скрытом хранилище приложения, не в галерее. В профиле собеседника группы фото и файлов качаются только по «Скачать». «Очистить» снимает копии с телефона, на сервере ничего не удаляется. «Сохранить» делает обычную копию в галерею или Загрузки.",
+            )
+        }
+    }
+}
+
+@Composable
+private fun HelpBlock(title: String, body: String) {
+    Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
+    Text(
+        body,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
