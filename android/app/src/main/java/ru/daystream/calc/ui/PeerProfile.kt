@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -80,14 +81,22 @@ fun PeerProfilePane(
     val linksLoad = remember(dialogId) { mutableStateOf(false) }
     val mediaLoad = remember(dialogId) { mutableStateOf(false) }
     val filesLoad = remember(dialogId) { mutableStateOf(false) }
-    val storage = remember(dialogId) { mutableStateOf<List<Pair<String, Long>>>(emptyList()) }
-    val cachedBytes = remember(dialogId) { mutableStateOf(0L) }
-    val cacheGen = remember(dialogId) { mutableStateOf(0) }
+    val storage = remember(dialogId) { mutableStateListOf<StoreItem>() }
+    val mediaBytes = remember(dialogId) { mutableStateOf(0L) }
+    val fileBytes = remember(dialogId) { mutableStateOf(0L) }
+    val fetchBusy = remember(dialogId) { mutableStateOf(false) }
     val uri = LocalUriHandler.current
     val login = peer["login"]?.toString().orEmpty()
 
+    fun groupItems(photos: Boolean): List<StoreItem> =
+        storage.filter { item ->
+            val media = item.kind == "photo" || item.kind == "video"
+            media == photos
+        }
+
     fun refreshCached() {
-        cachedBytes.value = vault.cachedBytes(storage.value)
+        mediaBytes.value = vault.cachedBytes(groupItems(true).map { it.id to it.size })
+        fileBytes.value = vault.cachedBytes(groupItems(false).map { it.id to it.size })
     }
 
     fun persistNick(value: String) {
@@ -151,24 +160,53 @@ fun PeerProfilePane(
     LaunchedEffect(dialogId) {
         try {
             val data = client.call { auth -> storage(auth, dialogId) }
-            storage.value = asMapList(data["items"]).mapNotNull { row ->
-                val id = row["id"].asLong()?.toString() ?: return@mapNotNull null
-                id to (row["size"].asLong()?.takeIf { it > 0 } ?: 102400L)
+            storage.clear()
+            asMapList(data["items"]).forEach { row ->
+                val id = row["id"].asLong()?.toString() ?: return@forEach
+                storage.add(
+                    StoreItem(
+                        id = id,
+                        size = row["size"].asLong()?.takeIf { it > 0 } ?: 102400L,
+                        kind = row.str("kind"),
+                    ),
+                )
             }
             refreshCached()
         } catch (_: Exception) { }
     }
 
-    suspend fun prefetch(rows: List<Map<String, Any>>, from: Int) {
-        if (rows.isEmpty()) return
-        val start = from.coerceIn(0, rows.lastIndex)
-        try {
-            vault.ensureSome(rows.drop(start), 50) {
-                readyTick.value += 1
-                refreshCached()
-            }
-        } catch (_: Exception) { }
+    fun clearGroup(photos: Boolean) {
+        vault.clearLocal(groupItems(photos).map { it.id })
+        readyTick.value += 1
         refreshCached()
+    }
+
+    fun downloadGroup(rows: List<Map<String, Any>>) {
+        if (fetchBusy.value || rows.isEmpty()) return
+        fetchBusy.value = true
+        scope.launch {
+            try {
+                vault.ensureSome(rows, 50) {
+                    readyTick.value += 1
+                    refreshCached()
+                }
+            } catch (_: Exception) { }
+            fetchBusy.value = false
+            refreshCached()
+        }
+    }
+
+    fun downloadOne(att: Map<String, Any>) {
+        if (fetchBusy.value) return
+        scope.launch {
+            try {
+                vault.ensureSome(listOf(att), 1) {
+                    readyTick.value += 1
+                    refreshCached()
+                }
+            } catch (_: Exception) { }
+            refreshCached()
+        }
     }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -200,26 +238,6 @@ fun PeerProfilePane(
                 colors = readableFieldColors(),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             )
-            Row(
-                Modifier.fillMaxWidth().padding(top = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "Скачано: ${formatBytes(cachedBytes.value)}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(
-                    onClick = {
-                        vault.clearLocal(storage.value.map { it.first })
-                        readyTick.value += 1
-                        cachedBytes.value = 0
-                        cacheGen.value += 1
-                    },
-                    enabled = cachedBytes.value > 0,
-                ) { Text("Очистить") }
-            }
         }
         TabRow(selectedTabIndex = tab.value) {
             Tab(selected = tab.value == 0, onClick = { tab.value = 0 }, text = { Text("Ссылки") })
@@ -244,20 +262,26 @@ fun PeerProfilePane(
                     rows = media,
                     vault = vault,
                     readyTick = readyTick.value,
-                    cacheGen = cacheGen.value,
+                    cachedBytes = mediaBytes.value,
+                    fetchBusy = fetchBusy.value,
                     loading = mediaLoad.value || (media.isEmpty() && mediaMore.value),
                     onNearEnd = { load("media") },
-                    onPrefetch = { from -> prefetch(media, from) },
+                    onClear = { clearGroup(true) },
+                    onDownloadAll = { downloadGroup(media.toList()) },
+                    onDownloadOne = { downloadOne(it) },
                     onOpen = onOpenMedia,
                 )
                 else -> ProfileFiles(
                     rows = files,
                     vault = vault,
                     readyTick = readyTick.value,
-                    cacheGen = cacheGen.value,
+                    cachedBytes = fileBytes.value,
+                    fetchBusy = fetchBusy.value,
                     loading = filesLoad.value || (files.isEmpty() && filesMore.value),
                     onNearEnd = { load("files") },
-                    onPrefetch = { from -> prefetch(files, from) },
+                    onClear = { clearGroup(false) },
+                    onDownloadAll = { downloadGroup(files.toList()) },
+                    onDownloadOne = { downloadOne(it) },
                 )
             }
         }
@@ -297,67 +321,89 @@ private fun ProfileLinks(
     }
 }
 
+@Composable
+private fun GroupCacheBar(
+    bytes: Long,
+    canClear: Boolean,
+    canDownload: Boolean,
+    busy: Boolean,
+    onClear: () -> Unit,
+    onDownload: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            formatBytes(bytes),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onClear, enabled = canClear && !busy) { Text("Очистить") }
+        TextButton(onClick = onDownload, enabled = canDownload && !busy) {
+            Text(if (busy) "…" else "Скачать")
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ProfileMedia(
     rows: List<Map<String, Any>>,
     vault: MediaVault,
     readyTick: Int,
-    cacheGen: Int,
+    cachedBytes: Long,
+    fetchBusy: Boolean,
     loading: Boolean,
     onNearEnd: suspend () -> Unit,
-    onPrefetch: suspend (Int) -> Unit,
+    onClear: () -> Unit,
+    onDownloadAll: () -> Unit,
+    onDownloadOne: (Map<String, Any>) -> Unit,
     onOpen: (List<ViewerItem>, Int) -> Unit,
 ) {
     val gridState = rememberLazyGridState()
-    val scope = rememberCoroutineScope()
     LaunchedEffect(gridState) {
         snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
             .distinctUntilChanged()
             .collect { idx -> if (idx >= rows.size - 6 && rows.isNotEmpty()) onNearEnd() }
     }
-    LaunchedEffect(gridState, cacheGen, rows.size) {
-        var armed = false
-        var origin: Pair<Int, Int>? = null
-        snapshotFlow { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset }
-            .distinctUntilChanged()
-            .collect { pos ->
-                if (!armed) {
-                    if (origin == null) {
-                        origin = pos
-                        return@collect
-                    }
-                    if (pos == origin) return@collect
-                    armed = true
-                }
-                onPrefetch(pos.first)
+    Column(Modifier.fillMaxSize()) {
+        GroupCacheBar(
+            bytes = cachedBytes,
+            canClear = cachedBytes > 0,
+            canDownload = rows.any { att ->
+                val id = att["id"].asLong()?.toString() ?: return@any false
+                !vault.store.has(id)
+            },
+            busy = fetchBusy,
+            onClear = onClear,
+            onDownload = onDownloadAll,
+        )
+        if (rows.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text(if (loading) "Загрузка…" else "Нет фото", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-    }
-    if (rows.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(if (loading) "Загрузка…" else "Нет фото", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            return@Column
         }
-        return
-    }
-    val viewerItems = rows.mapNotNull { attToViewer(it) }
-    LazyVerticalGrid(columns = GridCells.Fixed(3), state = gridState, modifier = Modifier.fillMaxSize()) {
-        itemsIndexed(rows, key = { _, att -> att["id"].asLong() ?: att.hashCode().toLong() }) { index, att ->
-            val item = attToViewer(att) ?: return@itemsIndexed
-            HiddenThumb(
-                vault = vault,
-                item = item,
-                readyTick = readyTick,
-                modifier = Modifier.fillMaxWidth().aspectRatio(1f).padding(0.5.dp),
-                onClick = {
-                    scope.launch {
-                        try {
-                            vault.ensureSome(listOf(att), 1) {}
-                        } catch (_: Exception) { }
-                        onOpen(viewerItems, index.coerceIn(0, viewerItems.lastIndex))
-                    }
-                },
-                onLong = {},
-            )
+        val viewerItems = rows.mapNotNull { attToViewer(it) }
+        LazyVerticalGrid(columns = GridCells.Fixed(3), state = gridState, modifier = Modifier.weight(1f).fillMaxWidth()) {
+            itemsIndexed(rows, key = { _, att -> att["id"].asLong() ?: att.hashCode().toLong() }) { index, att ->
+                val item = attToViewer(att) ?: return@itemsIndexed
+                val local = vault.store.has(item.id)
+                HiddenThumb(
+                    vault = vault,
+                    item = item,
+                    readyTick = readyTick,
+                    modifier = Modifier.fillMaxWidth().aspectRatio(1f).padding(0.5.dp),
+                    onClick = {
+                        if (local) onOpen(viewerItems, index.coerceIn(0, viewerItems.lastIndex))
+                        else onDownloadOne(att)
+                    },
+                    onLong = {},
+                )
+            }
         }
     }
 }
@@ -367,60 +413,56 @@ private fun ProfileFiles(
     rows: List<Map<String, Any>>,
     vault: MediaVault,
     readyTick: Int,
-    cacheGen: Int,
+    cachedBytes: Long,
+    fetchBusy: Boolean,
     loading: Boolean,
     onNearEnd: suspend () -> Unit,
-    onPrefetch: suspend (Int) -> Unit,
+    onClear: () -> Unit,
+    onDownloadAll: () -> Unit,
+    onDownloadOne: (Map<String, Any>) -> Unit,
 ) {
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
     LaunchedEffect(listState) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
             .distinctUntilChanged()
             .collect { idx -> if (idx >= rows.size - 4 && rows.isNotEmpty()) onNearEnd() }
     }
-    LaunchedEffect(listState, cacheGen, rows.size) {
-        var armed = false
-        var origin: Pair<Int, Int>? = null
-        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
-            .distinctUntilChanged()
-            .collect { pos ->
-                if (!armed) {
-                    if (origin == null) {
-                        origin = pos
-                        return@collect
-                    }
-                    if (pos == origin) return@collect
-                    armed = true
-                }
-                onPrefetch(pos.first)
+    Column(Modifier.fillMaxSize()) {
+        GroupCacheBar(
+            bytes = cachedBytes,
+            canClear = cachedBytes > 0,
+            canDownload = rows.any { att ->
+                val id = att["id"].asLong()?.toString() ?: return@any false
+                !vault.store.has(id)
+            },
+            busy = fetchBusy,
+            onClear = onClear,
+            onDownload = onDownloadAll,
+        )
+        if (rows.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text(if (loading) "Загрузка…" else "Нет файлов", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-    }
-    if (rows.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(if (loading) "Загрузка…" else "Нет файлов", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            return@Column
         }
-        return
-    }
-    LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-        itemsIndexed(rows, key = { _, att -> att["id"].asLong() ?: att.hashCode().toLong() }) { index, att ->
-            val item = attToViewer(att) ?: return@itemsIndexed
-            Box(
-                Modifier
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                    .clickable {
-                        scope.launch {
-                            try {
-                                onPrefetch(index)
-                            } catch (_: Exception) { }
-                        }
-                    },
-            ) {
-                FileRow(vault, item, readyTick, onLong = {})
+        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
+            itemsIndexed(rows, key = { _, att -> att["id"].asLong() ?: att.hashCode().toLong() }) { _, att ->
+                val item = attToViewer(att) ?: return@itemsIndexed
+                Box(Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                    FileRow(
+                        vault = vault,
+                        item = item,
+                        readyTick = readyTick,
+                        onLong = {},
+                        onDownload = { onDownloadOne(att) },
+                    )
+                }
             }
         }
     }
 }
+
+private data class StoreItem(val id: String, val size: Long, val kind: String)
 
 private fun attToViewer(att: Map<String, Any>): ViewerItem? {
     val id = att["id"].asLong()?.toString() ?: return null

@@ -116,8 +116,8 @@ button, input, textarea { font: inherit; }
 .profile-av { width: 96px; height: 96px; margin: 0 auto 10px; font-size: 36px; }
 .profile-login { font-weight: 600; font-size: 18px; }
 .profile-nick { width: min(320px, 90%); margin: 12px auto 6px; display: block; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--input); color: var(--text); text-align: center; }
-.profile-store { margin-top: 8px; }
-.profile-tabs { display: flex; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); }
+.profile-storebar { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; color: var(--muted); font-size: 14px; border-bottom: 1px solid var(--border); position: sticky; top: 46px; z-index: 1; background: var(--bg); }
+.profile-tabs { display: flex; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 2; background: var(--bg); }
 .profile-tabs button { flex: 1; border: 0; background: transparent; color: var(--muted); padding: 12px; cursor: pointer; border-bottom: 2px solid transparent; }
 .profile-tabs button.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 .profile-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }

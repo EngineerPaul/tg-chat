@@ -72,7 +72,8 @@ export default function PeerProfile({ dialogId, peer, onPeer, onClose, onOpenMed
   const loading = useRef({ links: false, media: false, files: false });
   const nickTimer = useRef<number | null>(null);
   const nickRef = useRef(peer.nick || "");
-  const [storedBytes, setStoredBytes] = useState(0);
+  const [mediaBytes, setMediaBytes] = useState(0);
+  const [fileBytes, setFileBytes] = useState(0);
 
   useEffect(() => {
     setNick(peer.nick || "");
@@ -83,13 +84,24 @@ export default function PeerProfile({ dialogId, peer, onPeer, onClose, onOpenMed
     let gone = false;
     void (async () => {
       try {
-        const data = await jsonOrThrow<{ items: { id: number; size: number }[] }>(
+        const data = await jsonOrThrow<{ items: { id: number; size: number; kind?: string }[] }>(
           await api(`/dialogs/${dialogId}/storage`),
         );
         if (gone) return;
-        setStoredBytes(data.items.reduce((sum, row) => sum + (row.size || 0), 0));
+        let photos = 0;
+        let docs = 0;
+        for (const row of data.items) {
+          const n = row.size || 0;
+          if (row.kind === "file") docs += n;
+          else photos += n;
+        }
+        setMediaBytes(photos);
+        setFileBytes(docs);
       } catch {
-        if (!gone) setStoredBytes(0);
+        if (!gone) {
+          setMediaBytes(0);
+          setFileBytes(0);
+        }
       }
     })();
     return () => {
@@ -221,7 +233,6 @@ export default function PeerProfile({ dialogId, peer, onPeer, onClose, onOpenMed
             }}
           />
           <div className="prev">{name !== peer.login ? `В чате: ${name}` : "В чате показывается логин"}</div>
-          {storedBytes > 0 ? <div className="prev profile-store">Вложения: {formatSize(storedBytes)}</div> : null}
         </div>
         <div className="profile-tabs">
           <button type="button" className={tab === "links" ? "on" : ""} onClick={() => setTab("links")}>Ссылки</button>
@@ -242,7 +253,9 @@ export default function PeerProfile({ dialogId, peer, onPeer, onClose, onOpenMed
           )
         ) : null}
         {tab === "media" ? (
-          media.length ? (
+          <>
+          <div className="profile-storebar"><span>{formatSize(mediaBytes) || "0 Б"}</span></div>
+          {media.length ? (
             <div className="profile-grid">
               {media.map((a, i) => (
                 <div
@@ -257,10 +270,13 @@ export default function PeerProfile({ dialogId, peer, onPeer, onClose, onOpenMed
             </div>
           ) : (
             <div className="profile-empty">{mediaMore ? "Загрузка…" : "Нет фото"}</div>
-          )
+          )}
+          </>
         ) : null}
         {tab === "files" ? (
-          files.length ? (
+          <>
+          <div className="profile-storebar"><span>{formatSize(fileBytes) || "0 Б"}</span></div>
+          {files.length ? (
             <div className="profile-list">
               {files.map((f) => (
                 <a key={f.id} className="profile-file" href={`${f.url}?download=1`}>
@@ -274,7 +290,8 @@ export default function PeerProfile({ dialogId, peer, onPeer, onClose, onOpenMed
             </div>
           ) : (
             <div className="profile-empty">{filesMore ? "Загрузка…" : "Нет файлов"}</div>
-          )
+          )}
+          </>
         ) : null}
       </div>
     </div>

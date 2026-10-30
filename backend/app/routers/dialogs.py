@@ -187,12 +187,15 @@ def dialog_storage(
     """Id и размеры вложений диалога (orig_size) для подсчёта локального кэша."""
     _need_dialog(dialog_id, db, user)
     rows = (
-        db.query(Attachment.id, Attachment.orig_size)
+        db.query(Attachment.id, Attachment.orig_size, Attachment.kind)
         .join(Message, Message.id == Attachment.message_id)
         .filter(Message.dialog_id == dialog_id, Message.deleted_at.is_(None))
         .all()
     )
-    items = [{"id": att_id, "size": size if size and size > 0 else 102400} for att_id, size in rows]
+    items = [
+        {"id": att_id, "size": size if size and size > 0 else 102400, "kind": kind}
+        for att_id, size, kind in rows
+    ]
     return {"items": items}
 
 

@@ -135,8 +135,10 @@ internal fun HiddenThumb(
     ) {
         if (bmp != null) {
             Image(bmp.asImageBitmap(), contentDescription = item.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        } else {
+            Text("Скачать", color = Color.White, style = MaterialTheme.typography.labelMedium)
         }
-        if (item.kind == "video") {
+        if (item.kind == "video" && bmp != null) {
             Text("▶", color = Color.White, modifier = Modifier.align(Alignment.Center))
         }
     }
@@ -144,7 +146,13 @@ internal fun HiddenThumb(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun FileRow(vault: MediaVault, item: ViewerItem, readyTick: Int, onLong: () -> Unit) {
+internal fun FileRow(
+    vault: MediaVault,
+    item: ViewerItem,
+    readyTick: Int,
+    onLong: () -> Unit,
+    onDownload: (() -> Unit)? = null,
+) {
     val scope = rememberCoroutineScope()
     val note = remember { mutableStateOf("") }
     val ready = remember(item.id, readyTick) { vault.store.has(item.id) }
@@ -180,6 +188,8 @@ internal fun FileRow(vault: MediaVault, item: ViewerItem, readyTick: Int, onLong
                     }
                 }
             }) { Text("Открыть") }
+        } else if (onDownload != null) {
+            TextButton(onClick = onDownload) { Text("Скачать") }
         }
     }
 }
